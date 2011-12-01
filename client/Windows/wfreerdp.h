@@ -31,22 +31,41 @@
 
 #include <freerdp/freerdp.h>
 #include <freerdp/gdi/gdi.h>
-#include <freerdp/gdi/color.h>
+#include <freerdp/gdi/dc.h>
+#include <freerdp/gdi/region.h>
+#include <freerdp/cache/cache.h>
+#include <freerdp/codec/color.h>
 #include <freerdp/utils/debug.h>
-#include <freerdp/chanman/chanman.h>
+#include <freerdp/channels/channels.h>
+#include <freerdp/codec/rfx.h>
+#include <freerdp/codec/nsc.h>
 
-#define SET_WFI(_instance, _wfi) (_instance)->param1 = _wfi
-#define GET_WFI(_instance) ((wfInfo*) ((_instance)->param1))
-
-#define SET_CHANMAN(_instance, _chanman) (_instance)->param2 = _chanman
-#define GET_CHANMAN(_instance) ((rdpChanMan*) ((_instance)->param2))
+#include "wf_event.h"
 
 struct wf_bitmap
 {
+	rdpBitmap _bitmap;
 	HDC hdc;
 	HBITMAP bitmap;
 	HBITMAP org_bitmap;
 };
+typedef struct wf_bitmap wfBitmap;
+
+struct wf_pointer
+{
+	rdpPointer pointer;
+};
+typedef struct wf_pointer wfPointer;
+
+typedef struct wf_info wfInfo;
+
+struct wf_context
+{
+	rdpContext _p;
+
+	wfInfo* wfi;
+};
+typedef struct wf_context wfContext;
 
 struct wf_info
 {
@@ -56,13 +75,23 @@ struct wf_info
 	char window_title[64];
 
 	HWND hwnd;
-	struct wf_bitmap* primary;
-	struct wf_bitmap* drawing;
+	HGDI_DC hdc;
+	uint16 srcBpp;
+	uint16 dstBpp;
+	freerdp* instance;
+	wfBitmap* primary;
+	wfBitmap* drawing;
 	HCLRCONV clrconv;
 	HCURSOR cursor;
 	HBRUSH brush;
 	HBRUSH org_brush;
+
+	wfBitmap* tile;
+	wfBitmap* image;
+	RFX_CONTEXT* rfx_context;
+	NSC_CONTEXT* nsc_context;
+
+	boolean sw_gdi;
 };
-typedef struct wf_info wfInfo;
 
 #endif

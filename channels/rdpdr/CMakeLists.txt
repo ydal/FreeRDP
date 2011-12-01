@@ -39,4 +39,9 @@ install(TARGETS rdpdr DESTINATION ${FREERDP_PLUGIN_PATH})
 
 add_subdirectory(disk)
 add_subdirectory(printer)
+add_subdirectory(parallel)
+add_subdirectory(serial)
 
+if(PCSC_FOUND)
+	add_subdirectory(smartcard)
+endif()

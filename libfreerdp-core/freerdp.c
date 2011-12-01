@@ -23,6 +23,7 @@
 #include "surface.h"
 #include "transport.h"
 #include "connection.h"
+#include "extension.h"
 
 #include <freerdp/freerdp.h>
 #include <freerdp/utils/memory.h>
@@ -32,19 +33,24 @@ boolean freerdp_connect(freerdp* instance)
 	rdpRdp* rdp;
 	boolean status;
 
-	rdp = (rdpRdp*) instance->rdp;
+	rdp = instance->context->rdp;
+
+	extension_pre_connect(rdp->extension);
 
 	IFCALL(instance->PreConnect, instance);
 
-	status = rdp_client_connect((rdpRdp*) instance->rdp);
+	status = rdp_client_connect(rdp);
 
 	if (status)
 	{
 		if (instance->settings->dump_rfx)
 		{
-			instance->update->dump_rfx = instance->settings->dump_rfx;
-			instance->update->pcap_rfx = pcap_open(instance->settings->dump_rfx_file, True);
+			instance->update->pcap_rfx = pcap_open(instance->settings->dump_rfx_file, true);
+			if (instance->update->pcap_rfx)
+				instance->update->dump_rfx = true;
 		}
+
+		extension_post_connect(rdp->extension);
 
 		IFCALL(instance->PostConnect, instance);
 
@@ -55,11 +61,12 @@ boolean freerdp_connect(freerdp* instance)
 			pcap_record record;
 
 			s = stream_new(1024);
-			instance->update->play_rfx = instance->settings->play_rfx;
-			instance->update->pcap_rfx = pcap_open(instance->settings->play_rfx_file, False);
+			instance->update->pcap_rfx = pcap_open(instance->settings->play_rfx_file, false);
+			if (instance->update->pcap_rfx)
+				instance->update->play_rfx = true;
 			update = instance->update;
 
-			while (pcap_has_next_record(update->pcap_rfx))
+			while (instance->update->play_rfx && pcap_has_next_record(update->pcap_rfx))
 			{
 				pcap_get_next_record_header(update->pcap_rfx, &record);
 
@@ -70,13 +77,13 @@ boolean freerdp_connect(freerdp* instance)
 				pcap_get_next_record_content(update->pcap_rfx, &record);
 				stream_set_pos(s, 0);
 
-				update->BeginPaint(update);
+				update->BeginPaint(update->context);
 				update_recv_surfcmds(update, s->size, s);
-				update->EndPaint(update);
+				update->EndPaint(update->context);
 			}
 
 			xfree(s->data);
-			return True;
+			return true;
 		}
 	}
 
@@ -87,37 +94,76 @@ boolean freerdp_get_fds(freerdp* instance, void** rfds, int* rcount, void** wfds
 {
 	rdpRdp* rdp;
 
-	rdp = (rdpRdp*) instance->rdp;
+	rdp = instance->context->rdp;
 	transport_get_fds(rdp->transport, rfds, rcount);
 
-	return True;
+	return true;
 }
 
 boolean freerdp_check_fds(freerdp* instance)
 {
-	rdpRdp* rdp;
 	int status;
+	rdpRdp* rdp;
 
-	rdp = (rdpRdp*) instance->rdp;
+	rdp = instance->context->rdp;
 
 	status = rdp_check_fds(rdp);
-	if (status < 0)
-		return False;
 
-	return True;
+	if (status < 0)
+		return false;
+
+	return true;
 }
 
 static int freerdp_send_channel_data(freerdp* instance, int channel_id, uint8* data, int size)
 {
-	return rdp_send_channel_data(instance->rdp, channel_id, data, size);
+	return rdp_send_channel_data(instance->context->rdp, channel_id, data, size);
 }
 
-void freerdp_disconnect(freerdp* instance)
+boolean freerdp_disconnect(freerdp* instance)
 {
 	rdpRdp* rdp;
 
-	rdp = (rdpRdp*) instance->rdp;
+	rdp = instance->context->rdp;
 	transport_disconnect(rdp->transport);
+
+	return true;
+}
+
+void freerdp_context_new(freerdp* instance)
+{
+	rdpRdp* rdp;
+
+	rdp = rdp_new(instance);
+	instance->input = rdp->input;
+	instance->update = rdp->update;
+	instance->settings = rdp->settings;
+
+	instance->context = (rdpContext*) xzalloc(instance->context_size);
+	instance->context->graphics = graphics_new(instance->context);
+	instance->context->instance = instance;
+	instance->context->rdp = rdp;
+
+	instance->update->context = instance->context;
+	instance->update->pointer->context = instance->context;
+	instance->update->primary->context = instance->context;
+	instance->update->secondary->context = instance->context;
+	instance->update->altsec->context = instance->context;
+
+	instance->input->context = instance->context;
+	input_register_client_callbacks(rdp->input);
+
+	IFCALL(instance->ContextNew, instance, instance->context);
+}
+
+void freerdp_context_free(freerdp* instance)
+{
+	IFCALL(instance->ContextFree, instance, instance->context);
+}
+
+uint32 freerdp_error_info(freerdp* instance)
+{
+	return instance->context->rdp->errorInfo;
 }
 
 freerdp* freerdp_new()
@@ -128,19 +174,8 @@ freerdp* freerdp_new()
 
 	if (instance != NULL)
 	{
-		rdpRdp* rdp = rdp_new(instance);
-		instance->rdp = (void*) rdp;
-		instance->input = rdp->input;
-		instance->update = rdp->update;
-		instance->settings = rdp->settings;
-
-		instance->Connect = freerdp_connect;
-		instance->GetFileDescriptor = freerdp_get_fds;
-		instance->CheckFileDescriptor = freerdp_check_fds;
+		instance->context_size = sizeof(rdpContext);
 		instance->SendChannelData = freerdp_send_channel_data;
-		instance->Disconnect = freerdp_disconnect;
-
-		input_register_client_callbacks(rdp->input);
 	}
 
 	return instance;
@@ -150,7 +185,7 @@ void freerdp_free(freerdp* freerdp)
 {
 	if (freerdp)
 	{
-		rdp_free(freerdp->rdp);
+		rdp_free(freerdp->context->rdp);
 		xfree(freerdp);
 	}
 }

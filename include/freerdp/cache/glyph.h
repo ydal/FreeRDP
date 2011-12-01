@@ -22,35 +22,52 @@
 
 #include <freerdp/api.h>
 #include <freerdp/types.h>
+#include <freerdp/update.h>
 #include <freerdp/utils/stream.h>
 
-struct _GLYPH_CACHE_ENTRY
-{
-	void* entry;
-	void* extra;
-};
-typedef struct _GLYPH_CACHE_ENTRY GLYPH_CACHE_ENTRY;
+typedef struct _GLYPH_CACHE GLYPH_CACHE;
+typedef struct _FRAGMENT_CACHE_ENTRY FRAGMENT_CACHE_ENTRY;
+typedef struct _FRAGMENT_CACHE FRAGMENT_CACHE;
+typedef struct rdp_glyph_cache rdpGlyphCache;
+
+#include <freerdp/cache/cache.h>
 
 struct _GLYPH_CACHE
 {
-	uint16 number;
-	uint16 maxCellSize;
-	GLYPH_CACHE_ENTRY* entries;
+	uint32 number;
+	uint32 maxCellSize;
+	rdpGlyph** entries;
 };
-typedef struct _GLYPH_CACHE GLYPH_CACHE;
 
-struct rdp_glyph
+struct _FRAGMENT_CACHE_ENTRY
 {
-	rdpSettings* settings;
-	GLYPH_CACHE glyphCache[10];
-	GLYPH_CACHE fragCache;
+	void* fragment;
+	uint32 size;
 };
-typedef struct rdp_glyph rdpGlyph;
 
-FREERDP_API void* glyph_get(rdpGlyph* glyph, uint8 id, uint16 index, void** extra);
-FREERDP_API void glyph_put(rdpGlyph* glyph, uint8 id, uint16 index, void* entry, void* extra);
+struct _FRAGMENT_CACHE
+{
+	FRAGMENT_CACHE_ENTRY* entries;
+};
 
-FREERDP_API rdpGlyph* glyph_new(rdpSettings* settings);
-FREERDP_API void glyph_free(rdpGlyph* glyph);
+struct rdp_glyph_cache
+{
+	FRAGMENT_CACHE fragCache;
+	GLYPH_CACHE glyphCache[10];
+
+	rdpContext* context;
+	rdpSettings* settings;
+};
+
+FREERDP_API rdpGlyph* glyph_cache_get(rdpGlyphCache* glyph_cache, uint32 id, uint32 index);
+FREERDP_API void glyph_cache_put(rdpGlyphCache* glyph_cache, uint32 id, uint32 index, rdpGlyph* entry);
+
+FREERDP_API void* glyph_cache_fragment_get(rdpGlyphCache* glyph, uint32 index, uint32* count);
+FREERDP_API void glyph_cache_fragment_put(rdpGlyphCache* glyph, uint32 index, uint32 count, void* entry);
+
+FREERDP_API void glyph_cache_register_callbacks(rdpUpdate* update);
+
+FREERDP_API rdpGlyphCache* glyph_cache_new(rdpSettings* settings);
+FREERDP_API void glyph_cache_free(rdpGlyphCache* glyph);
 
 #endif /* __GLYPH_CACHE_H */

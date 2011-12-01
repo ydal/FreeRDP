@@ -17,12 +17,34 @@
  * limitations under the License.
  */
 
+#include <freerdp/update.h>
+#include <freerdp/freerdp.h>
 #include <freerdp/utils/stream.h>
 #include <freerdp/utils/memory.h>
 
 #include <freerdp/cache/brush.h>
 
-void* brush_get(rdpBrush* brush, uint8 index, uint8* bpp)
+void update_gdi_patblt(rdpContext* context, PATBLT_ORDER* patblt)
+{
+	rdpBrush* brush = &patblt->brush;
+	rdpCache* cache = context->cache;
+
+	if (brush->style & CACHED_BRUSH)
+	{
+		brush->data = brush_cache_get(cache->brush, brush->index, &brush->bpp);
+		brush->style = 0x03;
+	}
+
+	IFCALL(cache->brush->PatBlt, context, patblt);
+}
+
+void update_gdi_cache_brush(rdpContext* context, CACHE_BRUSH_ORDER* cache_brush)
+{
+	rdpCache* cache = context->cache;
+	brush_cache_put(cache->brush, cache_brush->index, cache_brush->data, cache_brush->bpp);
+}
+
+void* brush_cache_get(rdpBrushCache* brush, uint32 index, uint32* bpp)
 {
 	void* entry;
 
@@ -58,7 +80,7 @@ void* brush_get(rdpBrush* brush, uint8 index, uint8* bpp)
 	return entry;
 }
 
-void brush_put(rdpBrush* brush, uint8 index, void* entry, uint8 bpp)
+void brush_cache_put(rdpBrushCache* brush, uint32 index, void* entry, uint32 bpp)
 {
 	if (bpp == 1)
 	{
@@ -84,11 +106,21 @@ void brush_put(rdpBrush* brush, uint8 index, void* entry, uint8 bpp)
 	}
 }
 
-rdpBrush* brush_new(rdpSettings* settings)
+void brush_cache_register_callbacks(rdpUpdate* update)
 {
-	rdpBrush* brush;
+	rdpCache* cache = update->context->cache;
 
-	brush = (rdpBrush*) xzalloc(sizeof(rdpBrush));
+	cache->brush->PatBlt = update->primary->PatBlt;
+
+	update->primary->PatBlt = update_gdi_patblt;
+	update->secondary->CacheBrush = update_gdi_cache_brush;
+}
+
+rdpBrushCache* brush_cache_new(rdpSettings* settings)
+{
+	rdpBrushCache* brush;
+
+	brush = (rdpBrushCache*) xzalloc(sizeof(rdpBrushCache));
 
 	if (brush != NULL)
 	{
@@ -104,7 +136,7 @@ rdpBrush* brush_new(rdpSettings* settings)
 	return brush;
 }
 
-void brush_free(rdpBrush* brush)
+void brush_cache_free(rdpBrushCache* brush)
 {
 	if (brush != NULL)
 	{

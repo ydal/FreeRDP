@@ -28,15 +28,19 @@ set(FREERDP_UTILS_SRCS
 	bitmap.c
 	hexdump.c
 	list.c
+	file.c
 	load_plugin.c
 	memory.c
 	mutex.c
+	passphrase.c
 	pcap.c
 	profiler.c
 	rail.c
+	rect.c
 	registry.c
 	certstore.c
 	semaphore.c
+	signal.c
 	sleep.c
 	stopwatch.c
 	stream.c
@@ -56,6 +60,9 @@ target_link_libraries(freerdp-utils ${CMAKE_THREAD_LIBS_INIT})
 
 if(WIN32)
 	target_link_libraries(freerdp-utils ws2_32)
+endif()
+if(${CMAKE_SYSTEM_NAME} MATCHES SunOS)
+	target_link_libraries(freerdp-utils rt)
 endif()
 
 install(TARGETS freerdp-utils DESTINATION ${CMAKE_INSTALL_LIBDIR})

@@ -128,6 +128,7 @@ boolean rdp_recv_server_redirection_pdu(rdpRdp* rdp, STREAM* s)
 
 	if (redirection->flags & LB_TARGET_NET_ADDRESSES)
 	{
+		int i;
 		uint32 count;
 		uint32 targetNetAddressesLength;
 
@@ -138,19 +139,17 @@ boolean rdp_recv_server_redirection_pdu(rdpRdp* rdp, STREAM* s)
 
 		redirection->targetNetAddresses = (rdpString*) xzalloc(count * sizeof(rdpString));
 
-		while (count > 0)
+		for (i = 0; i < (int) count; i++)
 		{
-			freerdp_string_read_length32(s, redirection->targetNetAddresses, rdp->settings->uniconv);
-			DEBUG_REDIR("targetNetAddresses: %s", redirection->targetNetAddresses->ascii);
-			redirection->targetNetAddresses++;
-			count--;
+			freerdp_string_read_length32(s, &redirection->targetNetAddresses[i], rdp->settings->uniconv);
+			DEBUG_REDIR("targetNetAddresses: %s", (&redirection->targetNetAddresses[i])->ascii);
 		}
 	}
 
 	stream_seek(s, 8); /* pad (8 bytes) */
 
 	if (redirection->flags & LB_NOREDIRECT)
-		return True;
+		return true;
 	else
 		return rdp_client_redirect(rdp);
 }
@@ -158,7 +157,7 @@ boolean rdp_recv_server_redirection_pdu(rdpRdp* rdp, STREAM* s)
 boolean rdp_recv_redirection_packet(rdpRdp* rdp, STREAM* s)
 {
 	rdp_recv_server_redirection_pdu(rdp, s);
-	return True;
+	return true;
 }
 
 boolean rdp_recv_enhanced_security_redirection_packet(rdpRdp* rdp, STREAM* s)
@@ -166,7 +165,7 @@ boolean rdp_recv_enhanced_security_redirection_packet(rdpRdp* rdp, STREAM* s)
 	stream_seek_uint16(s); /* pad2Octets (2 bytes) */
 	rdp_recv_server_redirection_pdu(rdp, s);
 	stream_seek_uint8(s); /* pad2Octets (1 byte) */
-	return True;
+	return true;
 }
 
 rdpRedirection* redirection_new()
@@ -187,6 +186,12 @@ void redirection_free(rdpRedirection* redirection)
 {
 	if (redirection != NULL)
 	{
+		//these four have already been freed in settings_free() and freerdp_string_free() checks for NULL
+		redirection->username.ascii = NULL;
+		redirection->domain.ascii = NULL;
+		redirection->targetNetAddress.ascii = NULL;
+		redirection->targetNetBiosName.ascii = NULL;
+
 		freerdp_string_free(&redirection->tsvUrl);
 		freerdp_string_free(&redirection->username);
 		freerdp_string_free(&redirection->domain);
@@ -200,7 +205,7 @@ void redirection_free(rdpRedirection* redirection)
 		{
 			int i;
 
-			for (i = 0; i < redirection->targetNetAddressesCount; i++)
+			for (i = 0; i < (int) redirection->targetNetAddressesCount; i++)
 				freerdp_string_free(&redirection->targetNetAddresses[i]);
 
 			xfree(redirection->targetNetAddresses);

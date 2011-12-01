@@ -62,7 +62,7 @@ static boolean freerdp_listener_open(freerdp_listener* instance, const char* bin
 	if (status != 0)
 	{
 		perror("getaddrinfo");
-		return False;
+		return false;
 	}
 
 	for (ai = res; ai && listener->num_sockfds < 5; ai = ai->ai_next)
@@ -78,10 +78,9 @@ static boolean freerdp_listener_open(freerdp_listener* instance, const char* bin
 		}
 
 		option_value = 1;
-		if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &option_value, sizeof(option_value)) == -1)
-		{
+
+		if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, (void*) &option_value, sizeof(option_value)) == -1)
 			perror("setsockopt");
-		}
 
 #ifndef _WIN32
 		fcntl(sockfd, F_SETFL, O_NONBLOCK);
@@ -118,7 +117,7 @@ static boolean freerdp_listener_open(freerdp_listener* instance, const char* bin
 
 	freeaddrinfo(res);
 
-	return (listener->num_sockfds > 0 ? True : False);
+	return (listener->num_sockfds > 0 ? true : false);
 }
 
 static void freerdp_listener_close(freerdp_listener* instance)
@@ -140,7 +139,7 @@ static boolean freerdp_listener_get_fds(freerdp_listener* instance, void** rfds,
 	int i;
 
 	if (listener->num_sockfds < 1)
-		return False;
+		return false;
 
 	for (i = 0; i < listener->num_sockfds; i++)
 	{
@@ -148,7 +147,7 @@ static boolean freerdp_listener_get_fds(freerdp_listener* instance, void** rfds,
 		(*rcount)++;
 	}
 
-	return True;
+	return true;
 }
 
 static boolean freerdp_listener_check_fds(freerdp_listener* instance)
@@ -162,7 +161,7 @@ static boolean freerdp_listener_check_fds(freerdp_listener* instance)
 	void* sin_addr;
 
 	if (listener->num_sockfds < 1)
-		return False;
+		return false;
 
 	for (i = 0; i < listener->num_sockfds; i++)
 	{
@@ -174,7 +173,7 @@ static boolean freerdp_listener_check_fds(freerdp_listener* instance)
 				continue;
 
 			perror("accept");
-			return False;
+			return false;
 		}
 
 		client = freerdp_peer_new(peer_sockfd);
@@ -183,15 +182,12 @@ static boolean freerdp_listener_check_fds(freerdp_listener* instance)
 			sin_addr = &(((struct sockaddr_in*)&peer_addr)->sin_addr);
 		else
 			sin_addr = &(((struct sockaddr_in6*)&peer_addr)->sin6_addr);
-		client->settings->hostname = xzalloc(50);
-		inet_ntop(peer_addr.ss_family, sin_addr, client->settings->hostname, 50);
-
-		printf("Accepted client from %s.\n", client->settings->hostname);
+		inet_ntop(peer_addr.ss_family, sin_addr, client->hostname, sizeof(client->hostname));
 
 		IFCALL(instance->PeerAccepted, instance, client);
 	}
 
-	return True;
+	return true;
 }
 
 freerdp_listener* freerdp_listener_new(void)

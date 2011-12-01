@@ -79,6 +79,7 @@ struct rdpsnd_plugin
 	uint16 fixed_format;
 	uint16 fixed_channel;
 	uint32 fixed_rate;
+	int latency;
 
 	/* Device plugin */
 	rdpsndDevicePlugin* device;
@@ -127,7 +128,7 @@ static void rdpsnd_process_interval(rdpSvcPlugin* plugin)
 		{
 			if (rdpsnd->device)
 				IFCALL(rdpsnd->device->Close, rdpsnd->device);
-			rdpsnd->is_open = False;
+			rdpsnd->is_open = false;
 			rdpsnd->close_timestamp = 0;
 
 			DEBUG_SVC("processed close");
@@ -305,7 +306,7 @@ static void rdpsnd_process_message_wave_info(rdpsndPlugin* rdpsnd, STREAM* data_
 	stream_read(data_in, rdpsnd->waveData, 4);
 	rdpsnd->waveDataSize = BodySize - 8;
 	rdpsnd->wave_timestamp = get_mstime();
-	rdpsnd->expectingWave = True;
+	rdpsnd->expectingWave = true;
 
 	DEBUG_SVC("waveDataSize %d wFormatNo %d", rdpsnd->waveDataSize, wFormatNo);
 
@@ -313,15 +314,17 @@ static void rdpsnd_process_message_wave_info(rdpsndPlugin* rdpsnd, STREAM* data_
 	if (!rdpsnd->is_open)
 	{
 		rdpsnd->current_format = wFormatNo;
-		rdpsnd->is_open = True;
+		rdpsnd->is_open = true;
 		if (rdpsnd->device)
-			IFCALL(rdpsnd->device->Open, rdpsnd->device, &rdpsnd->supported_formats[wFormatNo]);
+			IFCALL(rdpsnd->device->Open, rdpsnd->device, &rdpsnd->supported_formats[wFormatNo],
+				rdpsnd->latency);
 	}
 	else if (wFormatNo != rdpsnd->current_format)
 	{
 		rdpsnd->current_format = wFormatNo;
 		if (rdpsnd->device)
-			IFCALL(rdpsnd->device->SetFormat, rdpsnd->device, &rdpsnd->supported_formats[wFormatNo]);
+			IFCALL(rdpsnd->device->SetFormat, rdpsnd->device, &rdpsnd->supported_formats[wFormatNo],
+				rdpsnd->latency);
 	}
 }
 
@@ -452,7 +455,7 @@ static boolean rdpsnd_load_device_plugin(rdpsndPlugin* rdpsnd, const char* name,
 	}
 	if (entry == NULL)
 	{
-		return False;
+		return false;
 	}
 
 	entryPoints.rdpsnd = rdpsnd;
@@ -461,9 +464,9 @@ static boolean rdpsnd_load_device_plugin(rdpsndPlugin* rdpsnd, const char* name,
 	if (entry(&entryPoints) != 0)
 	{
 		DEBUG_WARN("%s entry returns error.", name);
-		return False;
+		return false;
 	}
-	return True;
+	return true;
 }
 
 static void rdpsnd_process_plugin_data(rdpsndPlugin* rdpsnd, RDP_PLUGIN_DATA* data)
@@ -479,6 +482,10 @@ static void rdpsnd_process_plugin_data(rdpsndPlugin* rdpsnd, RDP_PLUGIN_DATA* da
 	else if (strcmp((char*)data->data[0], "channel") == 0)
 	{
 		rdpsnd->fixed_channel = atoi(data->data[1]);
+	}
+	else if (strcmp((char*)data->data[0], "latency") == 0)
+	{
+		rdpsnd->latency = atoi(data->data[1]);
 	}
 	else
 	{
@@ -497,6 +504,7 @@ static void rdpsnd_process_connect(rdpSvcPlugin* plugin)
 	plugin->interval_callback = rdpsnd_process_interval;
 
 	rdpsnd->data_out_list = list_new();
+	rdpsnd->latency = -1;
 
 	data = (RDP_PLUGIN_DATA*)plugin->channel_entry_points.pExtendedData;
 	while (data && data->size > 0)

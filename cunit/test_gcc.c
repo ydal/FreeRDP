@@ -127,7 +127,7 @@ void test_gcc_write_client_core_data(void)
 	rdpSettings* settings;
 
 	s = stream_new(512);
-	settings = settings_new();
+	settings = settings_new(NULL);
 
 	settings->width = 1280;
 	settings->height = 1024;
@@ -154,7 +154,7 @@ void test_gcc_write_client_security_data(void)
 	rdpSettings* settings;
 
 	s = stream_new(12);
-	settings = settings_new();
+	settings = settings_new(NULL);
 
 	settings->encryption = 1; /* turn on encryption */
 	settings->encryption_method =
@@ -177,7 +177,7 @@ void test_gcc_write_client_cluster_data(void)
 	rdpSettings* settings;
 
 	s = stream_new(12);
-	settings = settings_new();
+	settings = settings_new(NULL);
 
 	gcc_write_client_cluster_data(s, settings);
 
@@ -195,10 +195,10 @@ void test_gcc_write_client_network_data(void)
 	rdpSettings* settings;
 
 	s = stream_new(44);
-	settings = settings_new();
+	settings = settings_new(NULL);
 
 	settings->num_channels = 3;
-	memset(settings->channels, 0, sizeof(rdpChan) * settings->num_channels);
+	memset(settings->channels, 0, sizeof(rdpChannel) * settings->num_channels);
 
 	strcpy(settings->channels[0].name, "rdpdr");
 	settings->channels[0].options = 0x80800000;

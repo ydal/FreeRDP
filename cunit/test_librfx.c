@@ -29,7 +29,7 @@
 #include <freerdp/utils/print.h>
 #include <freerdp/utils/memory.h>
 #include <freerdp/utils/hexdump.h>
-#include <freerdp/rfx/rfx.h>
+#include <freerdp/codec/rfx.h>
 #include "rfx_types.h"
 #include "rfx_bitstream.h"
 #include "rfx_rlgr.h"
@@ -195,7 +195,8 @@ void test_bitstream(void)
 	rfx_bitstream_attach(bs, (uint8*) y_data, sizeof(y_data));
 	while (!rfx_bitstream_eos(bs))
 	{
-		b = rfx_bitstream_get_bits(bs, 3);
+		rfx_bitstream_get_bits(bs, 3, b);
+		(void) b;
 		//printf("%u ", b);
 	}
 	xfree(bs);
@@ -392,7 +393,7 @@ void test_message(void)
 		stream_seal(s);
 		/*hexdump(buffer, size);*/
 		stream_set_pos(s, 0);
-		message = rfx_process_message(context, s);
+		message = rfx_process_message(context, s->p, s->size);
 		if (i == 0)
 		{
 			for (j = 0; j < message->num_tiles; j++)

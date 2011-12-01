@@ -20,19 +20,36 @@
 #ifndef __DFREERDP_H
 #define __DFREERDP_H
 
-#include <stdio.h>
-#include <unistd.h>
-#include <string.h>
-#include <directfb.h>
 #include <freerdp/freerdp.h>
-#include <freerdp/chanman/chanman.h>
+#include <freerdp/graphics.h>
 #include <freerdp/gdi/gdi.h>
+#include <freerdp/codec/color.h>
+#include <freerdp/channels/channels.h>
 
-#define SET_DFI(_instance, _dfi) (_instance)->param1 = _dfi
-#define GET_DFI(_instance) ((dfInfo*) ((_instance)->param1))
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <directfb.h>
 
-#define SET_CHANMAN(_instance, _chanman) (_instance)->param2 = _chanman
-#define GET_CHANMAN(_instance) ((rdpChanMan*) ((_instance)->param2))
+typedef struct df_info dfInfo;
+
+struct df_context
+{
+	rdpContext _p;
+
+	dfInfo* dfi;
+	rdpSettings* settings;
+};
+typedef struct df_context dfContext;
+
+struct df_pointer
+{
+	rdpPointer pointer;
+	IDirectFBSurface* surface;
+	uint32 xhot;
+	uint32 yhot;
+};
+typedef struct df_pointer dfPointer;
 
 struct df_info
 {
@@ -40,6 +57,7 @@ struct df_info
 	DFBResult err;
 	IDirectFB* dfb;
 	DFBEvent event;
+	HCLRCONV clrconv;
 	DFBRectangle update_rect;
 	DFBSurfaceDescription dsc;
 	IDirectFBSurface* primary;
@@ -47,6 +65,5 @@ struct df_info
 	IDirectFBDisplayLayer* layer;
 	IDirectFBEventBuffer* event_buffer;
 };
-typedef struct df_info dfInfo;
 
 #endif /* __DFREERDP_H */

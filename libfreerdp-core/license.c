@@ -21,7 +21,8 @@
 
 #include "license.h"
 
-uint8 LICENSE_MESSAGE_STRINGS[][32] =
+#ifdef WITH_DEBUG_LICENSE
+static const char* const LICENSE_MESSAGE_STRINGS[] =
 {
 		"",
 		"License Request",
@@ -39,7 +40,7 @@ uint8 LICENSE_MESSAGE_STRINGS[][32] =
 		"Error Alert"
 };
 
-uint8 error_codes[][32] =
+static const char* const error_codes[] =
 {
 	"ERR_UNKNOWN",
 	"ERR_INVALID_SERVER_CERTIFICATE",
@@ -56,7 +57,7 @@ uint8 error_codes[][32] =
 	"ERR_INVALID_MESSAGE_LENGTH"
 };
 
-uint8 state_transitions[][32] =
+static const char* const  state_transitions[] =
 {
 	"ST_UNKNOWN",
 	"ST_TOTAL_ABORT",
@@ -64,6 +65,7 @@ uint8 state_transitions[][32] =
 	"ST_RESET_PHASE_TO_START",
 	"ST_RESEND_LAST_MESSAGE"
 };
+#endif
 
 /**
  * Read a licensing preamble.\n
@@ -151,9 +153,9 @@ boolean license_send(rdpLicense* license, STREAM* s, uint8 type)
 
 	stream_set_pos(s, length);
 	if (transport_write(license->rdp->transport, s) < 0)
-		return False;
+		return false;
 
-	return True;
+	return true;
 }
 
 /**
@@ -175,19 +177,19 @@ boolean license_recv(rdpLicense* license, STREAM* s)
 	if (!rdp_read_header(license->rdp, s, &length, &channelId))
 	{
 		printf("Incorrect RDP header.\n");
-		return False;
+		return false;
 	}
 
 	rdp_read_security_header(s, &sec_flags);
 	if (!(sec_flags & SEC_LICENSE_PKT))
 	{
 		stream_rewind(s, RDP_SECURITY_HEADER_LENGTH);
-		if (rdp_recv_out_of_sequence_pdu(license->rdp, s) != True)
+		if (rdp_recv_out_of_sequence_pdu(license->rdp, s) != true)
 		{
 			printf("Unexpected license packet.\n");
-			return False;
+			return false;
 		}
-		return True;
+		return true;
 	}
 
 	license_read_preamble(s, &bMsgType, &flags, &wMsgSize); /* preamble (4 bytes) */
@@ -220,10 +222,10 @@ boolean license_recv(rdpLicense* license, STREAM* s)
 
 		default:
 			printf("invalid bMsgType:%d\n", bMsgType);
-			return False;
+			return false;
 	}
 
-	return True;
+	return true;
 }
 
 void license_generate_randoms(rdpLicense* license)
@@ -300,14 +302,21 @@ void license_generate_hwid(rdpLicense* license)
 
 void license_encrypt_premaster_secret(rdpLicense* license)
 {
+	uint8* encrypted_premaster_secret;
+#if 0
 	int key_length;
 	uint8* modulus;
 	uint8* exponent;
-	uint8* encrypted_premaster_secret;
+	rdpCertificate *certificate;
 
-	exponent = license->certificate->cert_info.exponent;
-	modulus = license->certificate->cert_info.modulus.data;
-	key_length = license->certificate->cert_info.modulus.length;
+	if (license->server_certificate->length)
+		certificate = license->certificate;
+	else
+		certificate = license->rdp->settings->server_cert;
+
+	exponent = certificate->cert_info.exponent;
+	modulus = certificate->cert_info.modulus.data;
+	key_length = certificate->cert_info.modulus.length;
 
 #ifdef WITH_DEBUG_LICENSE
 	printf("modulus (%d bits):\n", key_length * 8);
@@ -317,22 +326,21 @@ void license_encrypt_premaster_secret(rdpLicense* license)
 	freerdp_hexdump(exponent, 4);
 #endif
 
-#if 0
 	encrypted_premaster_secret = (uint8*) xmalloc(MODULUS_MAX_SIZE);
 	memset(encrypted_premaster_secret, 0, MODULUS_MAX_SIZE);
 
 	crypto_rsa_encrypt(license->premaster_secret, PREMASTER_SECRET_LENGTH,
 			key_length, modulus, exponent, encrypted_premaster_secret);
 
-	license->encrypted_premaster_secret->type = BB_ANY_BLOB;
+	license->encrypted_premaster_secret->type = BB_RANDOM_BLOB;
 	license->encrypted_premaster_secret->length = PREMASTER_SECRET_LENGTH;
 	license->encrypted_premaster_secret->data = encrypted_premaster_secret;
 #else
 	encrypted_premaster_secret = (uint8*) xmalloc(MODULUS_MAX_SIZE);
 	memset(encrypted_premaster_secret, 0, MODULUS_MAX_SIZE);
 
-	license->encrypted_premaster_secret->type = BB_ANY_BLOB;
-	license->encrypted_premaster_secret->length = MODULUS_MAX_SIZE;
+	license->encrypted_premaster_secret->type = BB_RANDOM_BLOB;
+	license->encrypted_premaster_secret->length = PREMASTER_SECRET_LENGTH;
 	license->encrypted_premaster_secret->data = encrypted_premaster_secret;
 #endif
 }
@@ -436,17 +444,21 @@ void license_read_binary_blob(STREAM* s, LICENSE_BLOB* blob)
 	uint16 wBlobType;
 
 	stream_read_uint16(s, wBlobType); /* wBlobType (2 bytes) */
+	stream_read_uint16(s, blob->length); /* wBlobLen (2 bytes) */
+
+	/*
+ 	 * Server can choose to not send data by setting len to 0.
+ 	 * If so, it may not bother to set the type, so shortcut the warning
+ 	 */
+	if (blob->type != BB_ANY_BLOB && blob->length == 0)
+		return;
 
 	if (blob->type != wBlobType && blob->type != BB_ANY_BLOB)
 	{
-		printf("license binary blob type does not match expected type.\n");
-		return;
+		printf("license binary blob type (%x) does not match expected type (%x).\n", wBlobType, blob->type);
 	}
 
 	blob->type = wBlobType;
-
-	stream_read_uint16(s, blob->length); /* wBlobLen (2 bytes) */
-
 	blob->data = (uint8*) xmalloc(blob->length);
 
 	stream_read(s, blob->data, blob->length); /* blobData */
@@ -470,13 +482,16 @@ void license_write_binary_blob(STREAM* s, LICENSE_BLOB* blob)
 
 void license_write_padded_binary_blob(STREAM* s, LICENSE_BLOB* blob)
 {
+	uint16 pad_len;
+
+	pad_len = 72 % blob->length;
 	stream_write_uint16(s, blob->type); /* wBlobType (2 bytes) */
-	stream_write_uint16(s, blob->length + LICENSING_PADDING_SIZE); /* wBlobLen (2 bytes) */
+	stream_write_uint16(s, blob->length + pad_len); /* wBlobLen (2 bytes) */
 
 	if (blob->length > 0)
 		stream_write(s, blob->data, blob->length); /* blobData */
 
-	stream_write_zero(s, LICENSING_PADDING_SIZE);
+	stream_write_zero(s, pad_len);
 }
 
 /**
@@ -743,13 +758,19 @@ void license_write_new_license_request_packet(rdpLicense* license, STREAM* s)
 void license_send_new_license_request_packet(rdpLicense* license)
 {
 	STREAM* s;
+	char* username;
 
 	s = license_send_stream_init(license);
 
-	license->client_user_name->data = (uint8*)license->rdp->settings->username;
-	license->client_user_name->length = strlen((char*)license->rdp->settings->username) + 1;
+	if (license->rdp->settings->username != NULL)
+		username = license->rdp->settings->username;
+	else
+		username = "username";
 
-	license->client_machine_name->data = (uint8*)license->rdp->settings->client_hostname;
+	license->client_user_name->data = (uint8*) username;
+	license->client_user_name->length = strlen(username) + 1;
+
+	license->client_machine_name->data = (uint8*) license->rdp->settings->client_hostname;
 	license->client_machine_name->length = strlen(license->rdp->settings->client_hostname) + 1;
 
 	license_write_new_license_request_packet(license, s);
@@ -851,7 +872,7 @@ boolean license_send_valid_client_error_packet(rdpLicense* license)
 
 	license_send(license, s, ERROR_ALERT);
 
-	return True;
+	return true;
 }
 
 /**
@@ -870,7 +891,8 @@ rdpLicense* license_new(rdpRdp* rdp)
 	{
 		license->rdp = rdp;
 		license->state = LICENSE_STATE_AWAIT;
-		license->certificate = certificate_new(rdp);
+		//license->certificate = certificate_new(rdp);
+		license->certificate = certificate_new();
 		license->product_info = license_new_product_info();
 		license->error_info = license_new_binary_blob(BB_ERROR_BLOB);
 		license->key_exchange_list = license_new_binary_blob(BB_KEY_EXCHG_ALG_BLOB);

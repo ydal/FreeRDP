@@ -24,8 +24,8 @@ include_directories(${ZLIB_INCLUDE_DIRS})
 set(LIBFREERDP_CORE_SRCS
 	activation.c
 	activation.h
-	bitmap.c
-	bitmap.h
+	extension.c
+	extension.h
 	ber.c
 	ber.h
 	gcc.c
@@ -54,6 +54,7 @@ set(LIBFREERDP_CORE_SRCS
 	orders.c
 	orders.h
 	freerdp.c
+	graphics.c
 	capabilities.c
 	capabilities.h
 	certificate.c
@@ -82,8 +83,8 @@ set(LIBFREERDP_CORE_SRCS
 	transport.h
 	update.c
 	update.h
-	vchan.c
-	vchan.h
+	channel.c
+	channel.h
 	window.c
 	window.h
 	listener.c
@@ -105,5 +106,6 @@ endif()
 
 target_link_libraries(freerdp-core ${OPENSSL_LIBRARIES})
 target_link_libraries(freerdp-core freerdp-utils)
+target_link_libraries(freerdp-core freerdp-codec)
 
 install(TARGETS freerdp-core DESTINATION ${CMAKE_INSTALL_LIBDIR})

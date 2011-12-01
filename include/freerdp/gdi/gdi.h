@@ -22,9 +22,9 @@
 
 #include <freerdp/api.h>
 #include <freerdp/freerdp.h>
-#include <freerdp/gdi/color.h>
 #include <freerdp/cache/cache.h>
 #include <freerdp/utils/debug.h>
+#include <freerdp/codec/color.h>
 
 /* For more information, see [MS-RDPEGDI] */
 
@@ -221,17 +221,30 @@ struct _GDI_DC
 typedef struct _GDI_DC GDI_DC;
 typedef GDI_DC* HGDI_DC;
 
-struct _GDI_IMAGE
+struct gdi_bitmap
 {
+	rdpBitmap _p;
+
 	HGDI_DC hdc;
 	HGDI_BITMAP bitmap;
 	HGDI_BITMAP org_bitmap;
 };
-typedef struct _GDI_IMAGE GDI_IMAGE;
-typedef GDI_IMAGE* HGDI_IMAGE;
+typedef struct gdi_bitmap gdiBitmap;
 
-struct _GDI
+struct gdi_glyph
 {
+	rdpBitmap _p;
+
+	HGDI_DC hdc;
+	HGDI_BITMAP bitmap;
+	HGDI_BITMAP org_bitmap;
+};
+typedef struct gdi_glyph gdiGlyph;
+
+struct rdp_gdi
+{
+	rdpContext* context;
+
 	int width;
 	int height;
 	int dstBpp;
@@ -242,32 +255,24 @@ struct _GDI
 
 	HGDI_DC hdc;
 	HCLRCONV clrconv;
-	GDI_IMAGE* primary;
-	GDI_IMAGE* drawing;
+	gdiBitmap* primary;
+	gdiBitmap* drawing;
 	uint8* primary_buffer;
 	GDI_COLOR textColor;
 	void* rfx_context;
-	GDI_IMAGE* tile;
-	GDI_IMAGE* image;
-
-	rdpCache* cache;
+	void* nsc_context;
+	gdiBitmap* tile;
+	gdiBitmap* image;
 };
-typedef struct _GDI GDI;
 
 FREERDP_API uint32 gdi_rop3_code(uint8 code);
-FREERDP_API void gdi_copy_mem(uint8 *d, uint8 *s, int n);
-FREERDP_API void gdi_copy_mem_backwards(uint8 *d, uint8 *s, int n);
 FREERDP_API uint8* gdi_get_bitmap_pointer(HGDI_DC hdcBmp, int x, int y);
 FREERDP_API uint8* gdi_get_brush_pointer(HGDI_DC hdcBrush, int x, int y);
 FREERDP_API int gdi_is_mono_pixel_set(uint8* data, int x, int y, int width);
-FREERDP_API GDI_IMAGE* gdi_bitmap_new(GDI *gdi, int width, int height, int bpp, uint8* data);
-FREERDP_API void gdi_bitmap_free(GDI_IMAGE *gdi_bmp);
-FREERDP_API void gdi_resize(GDI* gdi, int width, int height);
-FREERDP_API int gdi_init(freerdp* instance, uint32 flags);
-FREERDP_API void gdi_free(freerdp* instance);
+FREERDP_API void gdi_resize(rdpGdi* gdi, int width, int height);
 
-#define SET_GDI(_instance, _gdi) (_instance)->gdi = _gdi
-#define GET_GDI(_instance) ((GDI*) ((_instance)->gdi))
+FREERDP_API int gdi_init(freerdp* instance, uint32 flags, uint8* buffer);
+FREERDP_API void gdi_free(freerdp* instance);
 
 #ifdef WITH_DEBUG_GDI
 #define DEBUG_GDI(fmt, ...) DEBUG_CLASS(GDI, fmt, ## __VA_ARGS__)

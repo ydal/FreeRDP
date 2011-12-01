@@ -21,9 +21,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <freerdp/constants.h>
 #include <freerdp/types.h>
+#include <freerdp/constants.h>
+#include <freerdp/utils/hexdump.h>
 #include <freerdp/utils/memory.h>
+#include <freerdp/utils/unicode.h>
 #include <freerdp/utils/svc_plugin.h>
 #include <freerdp/plugins/cliprdr.h>
 
@@ -38,62 +40,168 @@
 
 void cliprdr_process_format_list_event(cliprdrPlugin* cliprdr, RDP_CB_FORMAT_LIST_EVENT* cb_event)
 {
-	STREAM* data_out;
 	int i;
+	STREAM* s;
 
-	data_out = cliprdr_packet_new(CB_FORMAT_LIST, 0, 36 * cb_event->num_formats);
+	DEBUG_CLIPRDR("Sending Clipboard Format List");
 
-	for (i = 0; i < cb_event->num_formats; i++)
+	if (cb_event->raw_format_data)
 	{
-		stream_write_uint32(data_out, cb_event->formats[i]);
-		switch (cb_event->formats[i])
+		s = cliprdr_packet_new(CB_FORMAT_LIST, 0, cb_event->raw_format_data_size);
+		stream_write(s, cb_event->raw_format_data, cb_event->raw_format_data_size);
+	}
+	else
+	{
+		s = cliprdr_packet_new(CB_FORMAT_LIST, 0, 36 * cb_event->num_formats);
+
+		for (i = 0; i < cb_event->num_formats; i++)
 		{
-			case CB_FORMAT_HTML:
-				memcpy(stream_get_tail(data_out), CFSTR_HTML, sizeof(CFSTR_HTML));
-				break;
-			case CB_FORMAT_PNG:
-				memcpy(stream_get_tail(data_out), CFSTR_PNG, sizeof(CFSTR_PNG));
-				break;
-			case CB_FORMAT_JPEG:
-				memcpy(stream_get_tail(data_out), CFSTR_JPEG, sizeof(CFSTR_JPEG));
-				break;
-			case CB_FORMAT_GIF:
-				memcpy(stream_get_tail(data_out), CFSTR_GIF, sizeof(CFSTR_GIF));
-				break;
+			stream_write_uint32(s, cb_event->formats[i]);
+			switch (cb_event->formats[i])
+			{
+				case CB_FORMAT_HTML:
+					memcpy(stream_get_tail(s), CFSTR_HTML, sizeof(CFSTR_HTML));
+					break;
+				case CB_FORMAT_PNG:
+					memcpy(stream_get_tail(s), CFSTR_PNG, sizeof(CFSTR_PNG));
+					break;
+				case CB_FORMAT_JPEG:
+					memcpy(stream_get_tail(s), CFSTR_JPEG, sizeof(CFSTR_JPEG));
+					break;
+				case CB_FORMAT_GIF:
+					memcpy(stream_get_tail(s), CFSTR_GIF, sizeof(CFSTR_GIF));
+					break;
+			}
+			stream_seek(s, 32);
 		}
-		stream_seek(data_out, 32);
 	}
 
-	cliprdr_packet_send(cliprdr, data_out);
+	cliprdr_packet_send(cliprdr, s);
 }
 
 static void cliprdr_send_format_list_response(cliprdrPlugin* cliprdr)
 {
-	STREAM* data_out;
-
-	data_out = cliprdr_packet_new(CB_FORMAT_LIST_RESPONSE, CB_RESPONSE_OK, 0);
-	cliprdr_packet_send(cliprdr, data_out);
+	STREAM* s;
+	DEBUG_CLIPRDR("Sending Clipboard Format List Response");
+	s = cliprdr_packet_new(CB_FORMAT_LIST_RESPONSE, CB_RESPONSE_OK, 0);
+	cliprdr_packet_send(cliprdr, s);
 }
 
-void cliprdr_process_format_list(cliprdrPlugin* cliprdr, STREAM* data_in, uint32 dataLen)
+void cliprdr_process_short_format_names(cliprdrPlugin* cliprdr, STREAM* s, uint32 length, uint16 flags)
 {
-	RDP_CB_FORMAT_LIST_EVENT* cb_event;
-	uint32 format;
-	int num_formats;
-	int supported;
 	int i;
+	boolean ascii;
+	int num_formats;
+	CLIPRDR_FORMAT_NAME* format_name;
 
-	cb_event = (RDP_CB_FORMAT_LIST_EVENT*)freerdp_event_new(RDP_EVENT_CLASS_CLIPRDR,
-		RDP_EVENT_TYPE_CB_FORMAT_LIST, NULL, NULL);
-	num_formats = dataLen / 36;
-	cb_event->formats = (uint32*)xmalloc(sizeof(uint32) * num_formats);
-	cb_event->num_formats = 0;
-	if (num_formats * 36 != dataLen)
-		DEBUG_WARN("dataLen %d not devided by 36!", dataLen);
+	num_formats = length / 36;
+
+	if (num_formats <= 0)
+	{
+		cliprdr->format_names = NULL;
+		cliprdr->num_format_names = 0;
+		return;
+	}
+
+	if (num_formats * 36 != length)
+		DEBUG_WARN("dataLen %d not divided by 36!", length);
+
+	ascii = (flags & CB_ASCII_NAMES) ? true : false;
+
+	cliprdr->format_names = (CLIPRDR_FORMAT_NAME*) xmalloc(sizeof(CLIPRDR_FORMAT_NAME) * num_formats);
+	cliprdr->num_format_names = num_formats;
+
 	for (i = 0; i < num_formats; i++)
 	{
-		stream_read_uint32(data_in, format);
-		supported = 1;
+		format_name = &cliprdr->format_names[i];
+
+		stream_read_uint32(s, format_name->id);
+
+		if (ascii)
+		{
+			format_name->name = xstrdup((char*) s->p);
+			format_name->length = strlen(format_name->name);
+		}
+		else
+		{
+			format_name->name = freerdp_uniconv_in(cliprdr->uniconv, s->p, 32);
+			format_name->length = strlen(format_name->name);
+		}
+
+		stream_seek(s, 32);
+	}
+}
+
+void cliprdr_process_long_format_names(cliprdrPlugin* cliprdr, STREAM* s, uint32 length, uint16 flags)
+{
+	int num_formats;
+	uint8* start_mark;
+	uint8* end_mark;
+	CLIPRDR_FORMAT_NAME* format_name;
+
+	num_formats = 0;
+	stream_get_mark(s, start_mark);
+	stream_get_mark(s, end_mark);
+	end_mark += length;
+
+	while (s->p < end_mark)
+	{
+		stream_seek_uint32(s);
+		stream_seek(s, 32);
+		num_formats++;
+	}
+
+	stream_set_mark(s, start_mark);
+
+	cliprdr->format_names = (CLIPRDR_FORMAT_NAME*) xmalloc(sizeof(CLIPRDR_FORMAT_NAME) * num_formats);
+	cliprdr->num_format_names = num_formats;
+	num_formats = 0;
+
+	while (s->p < end_mark)
+	{
+		format_name = &cliprdr->format_names[num_formats++];
+		stream_read_uint32(s, format_name->id);
+
+		format_name->name = freerdp_uniconv_in(cliprdr->uniconv, s->p, 32);
+		format_name->length = strlen(format_name->name);
+		stream_seek(s, 32);
+	}
+}
+
+void cliprdr_process_format_list(cliprdrPlugin* cliprdr, STREAM* s, uint32 dataLen, uint16 msgFlags)
+{
+	int i;
+	uint32 format;
+	boolean supported;
+	CLIPRDR_FORMAT_NAME* format_name;
+	RDP_CB_FORMAT_LIST_EVENT* cb_event;
+
+	cb_event = (RDP_CB_FORMAT_LIST_EVENT*) freerdp_event_new(RDP_EVENT_CLASS_CLIPRDR,
+		RDP_EVENT_TYPE_CB_FORMAT_LIST, NULL, NULL);
+
+	if (dataLen > 0)
+	{
+		cb_event->raw_format_data = (uint8*) xmalloc(dataLen);
+		memcpy(cb_event->raw_format_data, stream_get_tail(s), dataLen);
+		cb_event->raw_format_data_size = dataLen;
+	}
+
+	if (cliprdr->use_long_format_names)
+		cliprdr_process_long_format_names(cliprdr, s, dataLen, msgFlags);
+	else
+		cliprdr_process_short_format_names(cliprdr, s, dataLen, msgFlags);
+
+	if (cliprdr->num_format_names > 0)
+		cb_event->formats = (uint32*) xmalloc(sizeof(uint32) * cliprdr->num_format_names);
+
+	cb_event->num_formats = 0;
+
+	for (i = 0; i < cliprdr->num_format_names; i++)
+	{
+		supported = true;
+		format_name = &cliprdr->format_names[i];
+		format = format_name->id;
+
 		switch (format)
 		{
 			case CB_FORMAT_TEXT:
@@ -102,75 +210,121 @@ void cliprdr_process_format_list(cliprdrPlugin* cliprdr, STREAM* data_in, uint32
 				break;
 
 			default:
-				if (memcmp(stream_get_tail(data_in), CFSTR_HTML, sizeof(CFSTR_HTML)) == 0)
+
+				if (format_name->length > 0)
 				{
-					format = CB_FORMAT_HTML;
-					break;
+					DEBUG_CLIPRDR("format: %s", format_name->name);
+
+					if (strcmp(format_name->name, "HTML Format") == 0)
+					{
+						format = CB_FORMAT_HTML;
+						break;
+					}
+					if (strcmp(format_name->name, "PNG") == 0)
+					{
+						format = CB_FORMAT_PNG;
+						break;
+					}
+					if (strcmp(format_name->name, "JFIF") == 0)
+					{
+						format = CB_FORMAT_JPEG;
+						break;
+					}
+					if (strcmp(format_name->name, "GIF") == 0)
+					{
+						format = CB_FORMAT_GIF;
+						break;
+					}
 				}
-				if (memcmp(stream_get_tail(data_in), CFSTR_PNG, sizeof(CFSTR_PNG)) == 0)
-				{
-					format = CB_FORMAT_PNG;
-					break;
-				}
-				if (memcmp(stream_get_tail(data_in), CFSTR_JPEG, sizeof(CFSTR_JPEG)) == 0)
-				{
-					format = CB_FORMAT_JPEG;
-					break;
-				}
-				if (memcmp(stream_get_tail(data_in), CFSTR_GIF, sizeof(CFSTR_GIF)) == 0)
-				{
-					format = CB_FORMAT_GIF;
-					break;
-				}
-				supported = 0;
+
+				supported = false;
 				break;
 		}
-		stream_seek(data_in, 32);
 
 		if (supported)
 			cb_event->formats[cb_event->num_formats++] = format;
 	}
 
-	svc_plugin_send_event((rdpSvcPlugin*)cliprdr, (RDP_EVENT*)cb_event);
+	if (cliprdr->format_names != NULL)
+	{
+		xfree(cliprdr->format_names);
+		cliprdr->format_names = NULL;
+	}
+
+	cliprdr->num_format_names = 0;
+
+	svc_plugin_send_event((rdpSvcPlugin*) cliprdr, (RDP_EVENT*) cb_event);
 	cliprdr_send_format_list_response(cliprdr);
 }
 
-void cliprdr_process_format_data_request(cliprdrPlugin* cliprdr, STREAM* data_in)
+void cliprdr_process_format_list_response(cliprdrPlugin* cliprdr, STREAM* s, uint32 dataLen, uint16 msgFlags)
+{
+	/* where is this documented? */
+#if 0
+	RDP_EVENT* event;
+
+	if ((msgFlags & CB_RESPONSE_FAIL) != 0)
+	{
+		event = freerdp_event_new(RDP_EVENT_CLASS_CLIPRDR, RDP_EVENT_TYPE_CB_MONITOR_READY, NULL, NULL);
+		svc_plugin_send_event((rdpSvcPlugin*) cliprdr, event);
+	}
+#endif
+}
+
+void cliprdr_process_format_data_request(cliprdrPlugin* cliprdr, STREAM* s, uint32 dataLen, uint16 msgFlags)
 {
 	RDP_CB_DATA_REQUEST_EVENT* cb_event;
 
-	cb_event = (RDP_CB_DATA_REQUEST_EVENT*)freerdp_event_new(RDP_EVENT_CLASS_CLIPRDR,
+	cb_event = (RDP_CB_DATA_REQUEST_EVENT*) freerdp_event_new(RDP_EVENT_CLASS_CLIPRDR,
 		RDP_EVENT_TYPE_CB_DATA_REQUEST, NULL, NULL);
-	stream_read_uint32(data_in, cb_event->format);
-	svc_plugin_send_event((rdpSvcPlugin*)cliprdr, (RDP_EVENT*)cb_event);
+
+	stream_read_uint32(s, cb_event->format);
+	svc_plugin_send_event((rdpSvcPlugin*) cliprdr, (RDP_EVENT*) cb_event);
 }
 
 void cliprdr_process_format_data_response_event(cliprdrPlugin* cliprdr, RDP_CB_DATA_RESPONSE_EVENT* cb_event)
 {
-	STREAM* data_out;
+	STREAM* s;
 
-	data_out = cliprdr_packet_new(CB_FORMAT_DATA_RESPONSE, CB_RESPONSE_OK, cb_event->size);
-	stream_write(data_out, cb_event->data, cb_event->size);
-	cliprdr_packet_send(cliprdr, data_out);
+	DEBUG_CLIPRDR("Sending Format Data Response");
+
+	if (cb_event->size > 0)
+	{
+		s = cliprdr_packet_new(CB_FORMAT_DATA_RESPONSE, CB_RESPONSE_OK, cb_event->size);
+		stream_write(s, cb_event->data, cb_event->size);
+	}
+	else
+	{
+		s = cliprdr_packet_new(CB_FORMAT_DATA_RESPONSE, CB_RESPONSE_FAIL, 0);
+	}
+
+	cliprdr_packet_send(cliprdr, s);
 }
 
 void cliprdr_process_format_data_request_event(cliprdrPlugin* cliprdr, RDP_CB_DATA_REQUEST_EVENT* cb_event)
 {
-	STREAM* data_out;
+	STREAM* s;
 
-	data_out = cliprdr_packet_new(CB_FORMAT_DATA_REQUEST, 0, 4);
-	stream_write_uint32(data_out, cb_event->format);
-	cliprdr_packet_send(cliprdr, data_out);
+	DEBUG_CLIPRDR("Sending Format Data Request");
+
+	s = cliprdr_packet_new(CB_FORMAT_DATA_REQUEST, 0, 4);
+	stream_write_uint32(s, cb_event->format);
+	cliprdr_packet_send(cliprdr, s);
 }
 
-void cliprdr_process_format_data_response(cliprdrPlugin* cliprdr, STREAM* data_in, uint32 dataLen)
+void cliprdr_process_format_data_response(cliprdrPlugin* cliprdr, STREAM* s, uint32 dataLen, uint16 msgFlags)
 {
 	RDP_CB_DATA_RESPONSE_EVENT* cb_event;
 
-	cb_event = (RDP_CB_DATA_RESPONSE_EVENT*)freerdp_event_new(RDP_EVENT_CLASS_CLIPRDR,
+	cb_event = (RDP_CB_DATA_RESPONSE_EVENT*) freerdp_event_new(RDP_EVENT_CLASS_CLIPRDR,
 		RDP_EVENT_TYPE_CB_DATA_RESPONSE, NULL, NULL);
-	cb_event->size = dataLen;
-	cb_event->data = (uint8*)xmalloc(dataLen);
-	memcpy(cb_event->data, stream_get_tail(data_in), dataLen);
-	svc_plugin_send_event((rdpSvcPlugin*)cliprdr, (RDP_EVENT*)cb_event);
+
+	if (dataLen > 0)
+	{
+		cb_event->size = dataLen;
+		cb_event->data = (uint8*) xmalloc(dataLen);
+		memcpy(cb_event->data, stream_get_tail(s), dataLen);
+	}
+
+	svc_plugin_send_event((rdpSvcPlugin*) cliprdr, (RDP_EVENT*) cb_event);
 }

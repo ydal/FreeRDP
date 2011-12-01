@@ -23,7 +23,7 @@
 #include <freerdp/api.h>
 #include <freerdp/freerdp.h>
 #include <freerdp/gdi/gdi.h>
-#include <freerdp/gdi/color.h>
+#include <freerdp/codec/color.h>
 
 #include <freerdp/gdi/pen.h>
 #include <freerdp/gdi/bitmap.h>
@@ -47,7 +47,7 @@ uint32 gdi_get_color_32bpp(HGDI_DC hdc, GDI_COLOR color)
 	}
 	else
 	{
-		color32 = ARGB32(a, r, g, b);
+		color32 = ARGB32(a, b, g, r);
 	}
 
 	return color32;
@@ -164,9 +164,7 @@ static int BitBlt_SRCCOPY_32bpp(HGDI_DC hdcDest, int nXDest, int nYDest, int nWi
 			dstp = gdi_get_bitmap_pointer(hdcDest, nXDest, nYDest + y);
 
 			if (srcp != 0 && dstp != 0)
-			{
-				gdi_copy_mem(dstp, srcp, nWidth * hdcDest->bytesPerPixel);
-			}
+				memcpy(dstp, srcp, nWidth * hdcDest->bytesPerPixel);
 		}
 
 		return 0;
@@ -181,9 +179,7 @@ static int BitBlt_SRCCOPY_32bpp(HGDI_DC hdcDest, int nXDest, int nYDest, int nWi
 			dstp = gdi_get_bitmap_pointer(hdcDest, nXDest, nYDest + y);
 
 			if (srcp != 0 && dstp != 0)
-			{
-				gdi_copy_mem(dstp, srcp, nWidth * hdcDest->bytesPerPixel);
-			}
+				memmove(dstp, srcp, nWidth * hdcDest->bytesPerPixel);
 		}
 	}
 	else if (nYSrc > nYDest || nXSrc > nXDest)
@@ -195,9 +191,7 @@ static int BitBlt_SRCCOPY_32bpp(HGDI_DC hdcDest, int nXDest, int nYDest, int nWi
 			dstp = gdi_get_bitmap_pointer(hdcDest, nXDest, nYDest + y);
 
 			if (srcp != 0 && dstp != 0)
-			{
-				gdi_copy_mem(dstp, srcp, nWidth * hdcDest->bytesPerPixel);
-			}
+				memmove(dstp, srcp, nWidth * hdcDest->bytesPerPixel);
 		}
 	}
 	else
@@ -209,12 +203,10 @@ static int BitBlt_SRCCOPY_32bpp(HGDI_DC hdcDest, int nXDest, int nYDest, int nWi
 			dstp = gdi_get_bitmap_pointer(hdcDest, nXDest, nYDest + y);
 
 			if (srcp != 0 && dstp != 0)
-			{
-				gdi_copy_mem_backwards(dstp, srcp, nWidth * hdcDest->bytesPerPixel);
-			}
+				memmove(dstp, srcp, nWidth * hdcDest->bytesPerPixel);
 		}
 	}
-	
+
 	return 0;
 }
 

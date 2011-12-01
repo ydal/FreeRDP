@@ -31,7 +31,9 @@
 #include <unistd.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <netinet/in.h>
 #else
+#define SHUT_RDWR SD_BOTH
 #define close(_fd) closesocket(_fd)
 #endif
 
@@ -106,6 +108,7 @@ boolean tcp_connect(rdpTcp* tcp, const char* hostname, uint16 port)
 	struct addrinfo hints = { 0 };
 	struct addrinfo * res, * ai;
 
+	memset(&hints, 0, sizeof(struct addrinfo));
 	hints.ai_family = AF_UNSPEC;
 	hints.ai_socktype = SOCK_STREAM;
 
@@ -115,7 +118,7 @@ boolean tcp_connect(rdpTcp* tcp, const char* hostname, uint16 port)
 	if (status != 0)
 	{
 		printf("transport_connect: getaddrinfo (%s)\n", gai_strerror(status));
-		return False;
+		return false;
 	}
 
 	tcp->sockfd = -1;
@@ -140,13 +143,13 @@ boolean tcp_connect(rdpTcp* tcp, const char* hostname, uint16 port)
 	if (tcp->sockfd == -1)
 	{
 		printf("unable to connect to %s:%s\n", hostname, servname);
-		return False;
+		return false;
 	}
 
 	tcp_get_ip_address(tcp);
 	tcp_get_mac_address(tcp);
 
-	return True;
+	return true;
 }
 
 int tcp_read(rdpTcp* tcp, uint8* data, int length)
@@ -157,12 +160,25 @@ int tcp_read(rdpTcp* tcp, uint8* data, int length)
 
 	if (status <= 0)
 	{
+#ifdef _WIN32
+		int wsa_error = WSAGetLastError();
+
+		/* No data available */
+		if (wsa_error == WSAEWOULDBLOCK)
+			return 0;
+
+		/* When peer disconnects we get status 0 with no error. */
+		if (status < 0)
+			printf("recv() error: %d\n", wsa_error);
+#else
 		/* No data available */
 		if (errno == EAGAIN || errno == EWOULDBLOCK)
 			return 0;
+
 		/* When peer disconnects we get status 0 with no error. */
 		if (status < 0)
 			perror("recv");
+#endif
 		return -1;
 	}
 
@@ -190,11 +206,12 @@ boolean tcp_disconnect(rdpTcp * tcp)
 {
 	if (tcp->sockfd != -1)
 	{
+		shutdown(tcp->sockfd, SHUT_RDWR);
 		close(tcp->sockfd);
 		tcp->sockfd = -1;
 	}
 
-	return True;
+	return true;
 }
 
 boolean tcp_set_blocking_mode(rdpTcp* tcp, boolean blocking)
@@ -206,10 +223,10 @@ boolean tcp_set_blocking_mode(rdpTcp* tcp, boolean blocking)
 	if (flags == -1)
 	{
 		printf("transport_configure_sockfd: fcntl failed.\n");
-		return False;
+		return false;
 	}
 
-	if (blocking == True)
+	if (blocking == true)
 		fcntl(tcp->sockfd, F_SETFL, flags & ~(O_NONBLOCK));
 	else
 		fcntl(tcp->sockfd, F_SETFL, flags | O_NONBLOCK);
@@ -220,12 +237,14 @@ boolean tcp_set_blocking_mode(rdpTcp* tcp, boolean blocking)
 	WSAEventSelect(tcp->sockfd, tcp->wsa_event, FD_READ);
 #endif
 
-	return True;
+	return true;
 }
 
 rdpTcp* tcp_new(rdpSettings* settings)
 {
-	rdpTcp* tcp = (rdpTcp*) xzalloc(sizeof(rdpTcp));
+	rdpTcp* tcp;
+
+	tcp = (rdpTcp*) xzalloc(sizeof(rdpTcp));
 
 	if (tcp != NULL)
 	{

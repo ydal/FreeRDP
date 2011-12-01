@@ -33,9 +33,10 @@ set(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake/)
 include(AutoVersioning)
 include(ConfigOptions)
 include(FindOptionalPackage)
+include(CheckCCompilerFlag)
 
 # Soname versioning - 0.0.0 since it is not being managed yet
-set(FREERDP_VERSION_MAJOR "0")
+set(FREERDP_VERSION_MAJOR "1")
 set(FREERDP_VERSION_MINOR "0")
 set(FREERDP_VERSION_PATCH "0")
 set(FREERDP_VERSION "${FREERDP_VERSION_MAJOR}.${FREERDP_VERSION_MINOR}")
@@ -51,6 +52,11 @@ if(NOT DEFINED CMAKE_INSTALL_LIBDIR)
 	set(CMAKE_INSTALL_LIBDIR "lib")
 endif()
 
+# Set default bindir
+if(NOT DEFINED CMAKE_INSTALL_BINDIR)
+	set(CMAKE_INSTALL_BINDIR "bin")
+endif()
+
 # build shared libs
 if(NOT BUILD_SHARED_LIBS)
     set(BUILD_SHARED_LIBS ON)
@@ -58,11 +64,19 @@ endif()
 
 # Compiler-specific flags
 if(CMAKE_COMPILER_IS_GNUCC)
-	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -Wno-unused-but-set-variable")
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall")
+	CHECK_C_COMPILER_FLAG (-Wno-unused-result Wno-unused-result)
+	if(Wno-unused-result)
+		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-unused-result")
+	endif()
+	CHECK_C_COMPILER_FLAG (-Wno-unused-but-set-variable Wno-unused-but-set-variable)
+	if(Wno-unused-but-set-variable)
+		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-unused-but-set-variable")
+	endif()
 	if(CMAKE_BUILD_TYPE STREQUAL "Release")
 		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2")
 	endif()
-	if(WITH_SSE2)
+	if(WITH_SSE2_TARGET)
 		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -msse2")
 	endif()
 endif()
@@ -71,9 +85,12 @@ if(MSVC)
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /Gd /MT")
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /O2 /Ob2")
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D_X86_")
+	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D_UNICODE")
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DFREERDP_EXPORTS")
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -D_CRT_SECURE_NO_WARNINGS")
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -DWIN32_LEAN_AND_MEAN")
+	SET(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR})
+	SET(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR})
 endif()
 
 # Include files
@@ -82,15 +99,31 @@ check_include_files(sys/socket.h HAVE_SYS_SOCKET_H)
 check_include_files(netdb.h HAVE_NETDB_H)
 check_include_files(fcntl.h HAVE_FCNTL_H)
 check_include_files(unistd.h HAVE_UNISTD_H)
+check_include_files(limits.h HAVE_LIMITS_H)
+check_include_files(stdint.h HAVE_STDINT_H)
+check_include_files(stdbool.h HAVE_STDBOOL_H)
+check_include_files(inttypes.h HAVE_INTTYPES_H)
 
 # Libraries that we have a hard dependency on
 find_required_package(OpenSSL)
 
+# Mac OS X
+if(APPLE)
+	include_directories(/opt/local/include)
+	link_directories(/opt/local/lib)
+	set(CMAKE_SHARED_LINKER_FLAGS "-mmacosx-version-min=10.4")
+endif()
+
 if(NOT WIN32)
 	find_required_package(ZLIB)
-	find_suggested_package(ALSA)
 	find_optional_package(PulseAudio)
+	find_optional_package(PCSC)
 	find_suggested_package(Cups)
+	find_suggested_package(FFmpeg)
+
+	if(NOT APPLE)
+		find_suggested_package(ALSA)
+	endif()
 endif()
 
 # Endian
@@ -109,11 +142,9 @@ include_directories(${CMAKE_SOURCE_DIR}/include)
 # Configure files
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/config.h.in ${CMAKE_CURRENT_BINARY_DIR}/config.h)
 
-# Mac OS X
-if(APPLE)
-	include_directories(/opt/local/include)
-	link_directories(/opt/local/lib)
-endif()
+# Generate pkg-config
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/freerdp.pc.in ${CMAKE_CURRENT_BINARY_DIR}/freerdp.pc @ONLY)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/freerdp.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
 
 # Build CUnit
 find_optional_package(CUnit)
@@ -133,9 +164,9 @@ endif()
 add_subdirectory(libfreerdp-gdi)
 add_subdirectory(libfreerdp-rail)
 add_subdirectory(libfreerdp-cache)
-add_subdirectory(libfreerdp-chanman)
+add_subdirectory(libfreerdp-codec)
+add_subdirectory(libfreerdp-channels)
 add_subdirectory(libfreerdp-core)
-add_subdirectory(libfreerdp-rfx)
 
 if(NOT WIN32)
 	add_subdirectory(channels)
@@ -144,3 +175,11 @@ endif()
 add_subdirectory(client)
 add_subdirectory(server)
 add_subdirectory(keymaps)
+
+# Source package
+set(CPACK_SOURCE_IGNORE_FILES "/\\\\.git/;/\\\\.gitignore;/CMakeCache.txt")
+
+string(TOLOWER ${CMAKE_PROJECT_NAME} CMAKE_PROJECT_NAME_lower)
+set(CPACK_SOURCE_PACKAGE_FILE_NAME "${CMAKE_PROJECT_NAME_lower}-${FREERDP_VERSION_FULL}")
+
+include(CPack)

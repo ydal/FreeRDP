@@ -25,12 +25,18 @@ add_executable(xfreerdp
 	xf_gdi.h
 	xf_rail.c
 	xf_rail.h
+	xf_tsmf.c
+	xf_tsmf.h
 	xf_event.c
 	xf_event.h
-	xf_keyboard.c
-	xf_keyboard.h
+	xf_cliprdr.c
+	xf_cliprdr.h
 	xf_monitor.c
 	xf_monitor.h
+	xf_graphics.c
+	xf_graphics.h
+	xf_keyboard.c
+	xf_keyboard.h
 	xf_window.c
 	xf_window.h
 	xfreerdp.c
@@ -66,19 +72,27 @@ if(XEXT_FOUND)
 endif()
 
 find_suggested_package(Xcursor)
-if(Xcursor_FOUND)
+if(XCURSOR_FOUND)
 	add_definitions(-DWITH_XCURSOR)
-	include_directories(${Xcursor_INCLUDE_DIRS})
-	target_link_libraries(xfreerdp ${Xcursor_LIBRARIES})
+	include_directories(${XCURSOR_INCLUDE_DIRS})
+	target_link_libraries(xfreerdp ${XCURSOR_LIBRARIES})
 endif()
+
+find_suggested_package(Xv)
+if(XV_FOUND)
+	add_definitions(-DWITH_XV)
+	include_directories(${XV_INCLUDE_DIRS})
+	target_link_libraries(xfreerdp ${XV_LIBRARIES})
+endif()
+
+include_directories(${CMAKE_SOURCE_DIR}/resources)
 
 target_link_libraries(xfreerdp freerdp-core)
 target_link_libraries(xfreerdp freerdp-gdi)
 target_link_libraries(xfreerdp freerdp-kbd)
 target_link_libraries(xfreerdp freerdp-rail)
-target_link_libraries(xfreerdp freerdp-chanman)
+target_link_libraries(xfreerdp freerdp-channels)
 target_link_libraries(xfreerdp freerdp-utils)
-target_link_libraries(xfreerdp ${X11_LIBRARIES})
+target_link_libraries(xfreerdp ${X11_LIBRARIES} ${CMAKE_DL_LIBS})
 
-install(TARGETS xfreerdp DESTINATION bin)
-
+install(TARGETS xfreerdp DESTINATION ${CMAKE_INSTALL_BINDIR})

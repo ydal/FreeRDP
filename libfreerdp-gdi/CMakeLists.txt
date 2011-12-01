@@ -18,7 +18,6 @@
 # limitations under the License.
 
 set(FREERDP_GDI_SRCS
-	color.c
 	8bpp.c
 	16bpp.c
 	32bpp.c
@@ -32,12 +31,16 @@ set(FREERDP_GDI_SRCS
 	pen.c
 	region.c
 	shape.c
-	gdi.c)
+	graphics.c
+	graphics.h
+	gdi.c
+	gdi.h)
 
 add_library(freerdp-gdi ${FREERDP_GDI_SRCS})
 
+target_link_libraries(freerdp-gdi freerdp-core)
 target_link_libraries(freerdp-gdi freerdp-cache)
-target_link_libraries(freerdp-gdi freerdp-rfx)
+target_link_libraries(freerdp-gdi freerdp-codec)
 
 set_target_properties(freerdp-gdi PROPERTIES VERSION ${FREERDP_VERSION_FULL} SOVERSION ${FREERDP_VERSION} PREFIX "lib")
 

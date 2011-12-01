@@ -19,7 +19,8 @@
 
 #include "activation.h"
 
-uint8 CTRLACTION_STRINGS[][32] =
+/*
+static const char* const CTRLACTION_STRINGS[] =
 {
 		"",
 		"CTRLACTION_REQUEST_CONTROL",
@@ -27,6 +28,7 @@ uint8 CTRLACTION_STRINGS[][32] =
 		"CTRLACTION_DETACH",
 		"CTRLACTION_COOPERATE"
 };
+*/
 
 void rdp_write_synchronize_pdu(STREAM* s, rdpSettings* settings)
 {
@@ -36,7 +38,7 @@ void rdp_write_synchronize_pdu(STREAM* s, rdpSettings* settings)
 
 boolean rdp_recv_server_synchronize_pdu(rdpRdp* rdp, STREAM* s)
 {
-	return True;
+	return true;
 }
 
 boolean rdp_send_server_synchronize_pdu(rdpRdp* rdp)
@@ -49,7 +51,7 @@ boolean rdp_send_server_synchronize_pdu(rdpRdp* rdp)
 
 	rdp_send_data_pdu(rdp, s, DATA_PDU_TYPE_SYNCHRONIZE, rdp->mcs->user_id);
 
-	return True;
+	return true;
 }
 
 boolean rdp_recv_client_synchronize_pdu(STREAM* s)
@@ -57,14 +59,14 @@ boolean rdp_recv_client_synchronize_pdu(STREAM* s)
 	uint16 messageType;
 
 	if (stream_get_left(s) < 4)
-		return False;
+		return false;
 
 	stream_read_uint16(s, messageType); /* messageType (2 bytes) */
 	if (messageType != SYNCMSGTYPE_SYNC)
-		return False;
+		return false;
 	/* targetUser (2 bytes) */
 
-	return True;
+	return true;
 }
 
 boolean rdp_send_client_synchronize_pdu(rdpRdp* rdp)
@@ -81,13 +83,13 @@ boolean rdp_send_client_synchronize_pdu(rdpRdp* rdp)
 boolean rdp_recv_control_pdu(STREAM* s, uint16* action)
 {
 	if (stream_get_left(s) < 8)
-		return False;
+		return false;
 
 	stream_read_uint16(s, *action); /* action (2 bytes) */
 	stream_seek_uint16(s); /* grantId (2 bytes) */
 	stream_seek_uint32(s); /* controlId (4 bytes) */
 
-	return True;
+	return true;
 }
 
 void rdp_write_client_control_pdu(STREAM* s, uint16 action)
@@ -103,7 +105,7 @@ boolean rdp_recv_server_control_pdu(rdpRdp* rdp, STREAM* s)
 
 	rdp_recv_control_pdu(s, &action);
 
-	return True;
+	return true;
 }
 
 boolean rdp_send_server_control_cooperate_pdu(rdpRdp* rdp)
@@ -118,7 +120,7 @@ boolean rdp_send_server_control_cooperate_pdu(rdpRdp* rdp)
 
 	rdp_send_data_pdu(rdp, s, DATA_PDU_TYPE_CONTROL, rdp->mcs->user_id);
 
-	return True;
+	return true;
 }
 
 boolean rdp_send_server_control_granted_pdu(rdpRdp* rdp)
@@ -133,7 +135,7 @@ boolean rdp_send_server_control_granted_pdu(rdpRdp* rdp)
 
 	rdp_send_data_pdu(rdp, s, DATA_PDU_TYPE_CONTROL, rdp->mcs->user_id);
 
-	return True;
+	return true;
 }
 
 boolean rdp_send_client_control_pdu(rdpRdp* rdp, uint16 action)
@@ -165,7 +167,7 @@ void rdp_write_client_persistent_key_list_pdu(STREAM* s, rdpSettings* settings)
 	stream_write_uint16(s, 0); /* totalEntriesCache2 (2 bytes) */
 	stream_write_uint16(s, 0); /* totalEntriesCache3 (2 bytes) */
 	stream_write_uint16(s, 0); /* totalEntriesCache4 (2 bytes) */
-	stream_write_uint8(s, PERSIST_LAST_PDU); /* bBitMask (1 byte) */
+	stream_write_uint8(s, PERSIST_FIRST_PDU | PERSIST_LAST_PDU); /* bBitMask (1 byte) */
 	stream_write_uint8(s, 0); /* pad1 (1 byte) */
 	stream_write_uint16(s, 0); /* pad3 (2 bytes) */
 
@@ -186,9 +188,9 @@ boolean rdp_send_client_persistent_key_list_pdu(rdpRdp* rdp)
 boolean rdp_recv_client_font_list_pdu(STREAM* s)
 {
 	if (stream_get_left(s) < 8)
-		return False;
+		return false;
 
-	return True;
+	return true;
 }
 
 void rdp_write_client_font_list_pdu(STREAM* s, uint16 flags)
@@ -212,7 +214,7 @@ boolean rdp_send_client_font_list_pdu(rdpRdp* rdp, uint16 flags)
 
 boolean rdp_recv_server_font_map_pdu(rdpRdp* rdp, STREAM* s)
 {
-	return True;
+	return true;
 }
 
 boolean rdp_send_server_font_map_pdu(rdpRdp* rdp)
@@ -242,10 +244,10 @@ boolean rdp_recv_deactivate_all(rdpRdp* rdp, STREAM* s)
 	while (rdp->state != CONNECTION_STATE_ACTIVE)
 	{
 		if (rdp_check_fds(rdp) < 0)
-			return False;
+			return false;
 	}
 
-	return True;
+	return true;
 }
 
 boolean rdp_send_deactivate_all(rdpRdp* rdp)
@@ -266,22 +268,22 @@ boolean rdp_server_accept_client_control_pdu(rdpRdp* rdp, STREAM* s)
 	uint16 action;
 
 	if (!rdp_recv_control_pdu(s, &action))
-		return False;
+		return false;
 	if (action == CTRLACTION_REQUEST_CONTROL)
 	{
 		if (!rdp_send_server_control_granted_pdu(rdp))
-			return False;
+			return false;
 	}
-	return True;
+	return true;
 }
 
 boolean rdp_server_accept_client_font_list_pdu(rdpRdp* rdp, STREAM* s)
 {
 	if (!rdp_recv_client_font_list_pdu(s))
-		return False;
+		return false;
 	if (!rdp_send_server_font_map_pdu(rdp))
-		return False;
+		return false;
 
-	return True;
+	return true;
 }
 

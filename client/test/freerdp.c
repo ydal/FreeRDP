@@ -36,20 +36,22 @@
 #include <freerdp/utils/semaphore.h>
 #include <freerdp/utils/event.h>
 #include <freerdp/constants.h>
-#include <freerdp/chanman/chanman.h>
+#include <freerdp/channels/channels.h>
 #include <freerdp/plugins/cliprdr.h>
-
-#define SET_TFI(_instance, _tfi) (_instance)->param1 = _tfi
-#define GET_TFI(_instance) ((tfInfo*) ((_instance)->param1))
-
-#define SET_CHANMAN(_instance, _chanman) (_instance)->param2 = _chanman
-#define GET_CHANMAN(_instance) ((rdpChanMan*) ((_instance)->param2))
 
 struct tf_info
 {
 	void* data;
 };
 typedef struct tf_info tfInfo;
+
+struct tf_context
+{
+	rdpContext _p;
+
+	tfInfo* tfi;
+};
+typedef struct tf_context tfContext;
 
 freerdp_sem g_sem;
 static int g_thread_count = 0;
@@ -62,19 +64,25 @@ struct thread_data
 #include <freerdp/freerdp.h>
 #include <freerdp/utils/args.h>
 
-void tf_begin_paint(rdpUpdate* update)
+void tf_context_new(freerdp* instance, rdpContext* context)
 {
-	GDI* gdi = GET_GDI(update);
+	context->channels = freerdp_channels_new();
+}
+
+void tf_context_free(freerdp* instance, rdpContext* context)
+{
+
+}
+
+void tf_begin_paint(rdpContext* context)
+{
+	rdpGdi* gdi = context->gdi;
 	gdi->primary->hdc->hwnd->invalid->null = 1;
 }
 
-void tf_end_paint(rdpUpdate* update)
+void tf_end_paint(rdpContext* context)
 {
-	GDI* gdi;
-	tfInfo* tfi;
-
-	gdi = GET_GDI(update);
-	tfi = GET_TFI(update);
+	rdpGdi* gdi = context->gdi;
 
 	if (gdi->primary->hdc->hwnd->invalid->null)
 		return;
@@ -82,48 +90,50 @@ void tf_end_paint(rdpUpdate* update)
 
 int tf_receive_channel_data(freerdp* instance, int channelId, uint8* data, int size, int flags, int total_size)
 {
-	return freerdp_chanman_data(instance, channelId, data, size, flags, total_size);
+	return freerdp_channels_data(instance, channelId, data, size, flags, total_size);
 }
 
 int tf_process_plugin_args(rdpSettings* settings, const char* name, RDP_PLUGIN_DATA* plugin_data, void* user_data)
 {
-	rdpChanMan* chanman = (rdpChanMan*) user_data;
+	rdpChannels* channels = (rdpChannels*) user_data;
 
 	printf("Load plugin %s\n", name);
-	freerdp_chanman_load_plugin(chanman, settings, name, plugin_data);
+	freerdp_channels_load_plugin(channels, settings, name, plugin_data);
 
 	return 1;
 }
 
-void tf_process_cb_sync_event(rdpChanMan* chanman, freerdp* instance)
+void tf_process_cb_monitor_ready_event(rdpChannels* channels, freerdp* instance)
 {
 	RDP_EVENT* event;
 	RDP_CB_FORMAT_LIST_EVENT* format_list_event;
 
 	event = freerdp_event_new(RDP_EVENT_CLASS_CLIPRDR, RDP_EVENT_TYPE_CB_FORMAT_LIST, NULL, NULL);
 
-	format_list_event = (RDP_CB_FORMAT_LIST_EVENT*)event;
+	format_list_event = (RDP_CB_FORMAT_LIST_EVENT*) event;
 	format_list_event->num_formats = 0;
 
-	freerdp_chanman_send_event(chanman, event);
+	freerdp_channels_send_event(channels, event);
 }
 
-void tf_process_channel_event(rdpChanMan* chanman, freerdp* instance)
+void tf_process_channel_event(rdpChannels* channels, freerdp* instance)
 {
 	RDP_EVENT* event;
 
-	event = freerdp_chanman_pop_event(chanman);
+	event = freerdp_channels_pop_event(channels);
+
 	if (event)
 	{
 		switch (event->event_type)
 		{
-			case RDP_EVENT_TYPE_CB_SYNC:
-				tf_process_cb_sync_event(chanman, instance);
+			case RDP_EVENT_TYPE_CB_MONITOR_READY:
+				tf_process_cb_monitor_ready_event(channels, instance);
 				break;
 			default:
 				printf("tf_process_channel_event: unknown event type %d\n", event->event_type);
 				break;
 		}
+
 		freerdp_event_free(event);
 	}
 }
@@ -131,58 +141,56 @@ void tf_process_channel_event(rdpChanMan* chanman, freerdp* instance)
 boolean tf_pre_connect(freerdp* instance)
 {
 	tfInfo* tfi;
+	tfContext* context;
 	rdpSettings* settings;
 
+	context = (tfContext*) instance->context;
 	tfi = (tfInfo*) xzalloc(sizeof(tfInfo));
-	SET_TFI(instance, tfi);
+	context->tfi = tfi;
 
 	settings = instance->settings;
 
-	settings->order_support[NEG_DSTBLT_INDEX] = True;
-	settings->order_support[NEG_PATBLT_INDEX] = True;
-	settings->order_support[NEG_SCRBLT_INDEX] = True;
-	settings->order_support[NEG_OPAQUE_RECT_INDEX] = True;
-	settings->order_support[NEG_DRAWNINEGRID_INDEX] = True;
-	settings->order_support[NEG_MULTIDSTBLT_INDEX] = True;
-	settings->order_support[NEG_MULTIPATBLT_INDEX] = True;
-	settings->order_support[NEG_MULTISCRBLT_INDEX] = True;
-	settings->order_support[NEG_MULTIOPAQUERECT_INDEX] = True;
-	settings->order_support[NEG_MULTI_DRAWNINEGRID_INDEX] = True;
-	settings->order_support[NEG_LINETO_INDEX] = True;
-	settings->order_support[NEG_POLYLINE_INDEX] = True;
-	settings->order_support[NEG_MEMBLT_INDEX] = True;
-	settings->order_support[NEG_MEM3BLT_INDEX] = True;
-	settings->order_support[NEG_SAVEBITMAP_INDEX] = True;
-	settings->order_support[NEG_GLYPH_INDEX_INDEX] = True;
-	settings->order_support[NEG_FAST_INDEX_INDEX] = True;
-	settings->order_support[NEG_FAST_GLYPH_INDEX] = True;
-	settings->order_support[NEG_POLYGON_SC_INDEX] = True;
-	settings->order_support[NEG_POLYGON_CB_INDEX] = True;
-	settings->order_support[NEG_ELLIPSE_SC_INDEX] = True;
-	settings->order_support[NEG_ELLIPSE_CB_INDEX] = True;
+	settings->order_support[NEG_DSTBLT_INDEX] = true;
+	settings->order_support[NEG_PATBLT_INDEX] = true;
+	settings->order_support[NEG_SCRBLT_INDEX] = true;
+	settings->order_support[NEG_OPAQUE_RECT_INDEX] = true;
+	settings->order_support[NEG_DRAWNINEGRID_INDEX] = true;
+	settings->order_support[NEG_MULTIDSTBLT_INDEX] = true;
+	settings->order_support[NEG_MULTIPATBLT_INDEX] = true;
+	settings->order_support[NEG_MULTISCRBLT_INDEX] = true;
+	settings->order_support[NEG_MULTIOPAQUERECT_INDEX] = true;
+	settings->order_support[NEG_MULTI_DRAWNINEGRID_INDEX] = true;
+	settings->order_support[NEG_LINETO_INDEX] = true;
+	settings->order_support[NEG_POLYLINE_INDEX] = true;
+	settings->order_support[NEG_MEMBLT_INDEX] = true;
+	settings->order_support[NEG_MEM3BLT_INDEX] = true;
+	settings->order_support[NEG_SAVEBITMAP_INDEX] = true;
+	settings->order_support[NEG_GLYPH_INDEX_INDEX] = true;
+	settings->order_support[NEG_FAST_INDEX_INDEX] = true;
+	settings->order_support[NEG_FAST_GLYPH_INDEX] = true;
+	settings->order_support[NEG_POLYGON_SC_INDEX] = true;
+	settings->order_support[NEG_POLYGON_CB_INDEX] = true;
+	settings->order_support[NEG_ELLIPSE_SC_INDEX] = true;
+	settings->order_support[NEG_ELLIPSE_CB_INDEX] = true;
 
-	freerdp_chanman_pre_connect(GET_CHANMAN(instance), instance);
+	freerdp_channels_pre_connect(instance->context->channels, instance);
 
-	return True;
+	return true;
 }
 
 boolean tf_post_connect(freerdp* instance)
 {
-	GDI* gdi;
-	tfInfo* tfi;
+	rdpGdi* gdi;
 
-	tfi = GET_TFI(instance);
-	SET_TFI(instance->update, tfi);
-
-	gdi_init(instance, CLRCONV_ALPHA | CLRBUF_16BPP | CLRBUF_32BPP);
-	gdi = GET_GDI(instance->update);
+	gdi_init(instance, CLRCONV_ALPHA | CLRBUF_16BPP | CLRBUF_32BPP, NULL);
+	gdi = instance->context->gdi;
 
 	instance->update->BeginPaint = tf_begin_paint;
 	instance->update->EndPaint = tf_end_paint;
 
-	freerdp_chanman_post_connect(GET_CHANMAN(instance), instance);
+	freerdp_channels_post_connect(instance->context->channels, instance);
 
-	return True;
+	return true;
 }
 
 int tfreerdp_run(freerdp* instance)
@@ -196,26 +204,26 @@ int tfreerdp_run(freerdp* instance)
 	void* wfds[32];
 	fd_set rfds_set;
 	fd_set wfds_set;
-	rdpChanMan* chanman;
+	rdpChannels* channels;
 
 	memset(rfds, 0, sizeof(rfds));
 	memset(wfds, 0, sizeof(wfds));
 
-	chanman = GET_CHANMAN(instance);
+	channels = instance->context->channels;
 
-	instance->Connect(instance);
+	freerdp_connect(instance);
 
 	while (1)
 	{
 		rcount = 0;
 		wcount = 0;
 
-		if (instance->GetFileDescriptor(instance, rfds, &rcount, wfds, &wcount) != True)
+		if (freerdp_get_fds(instance, rfds, &rcount, wfds, &wcount) != true)
 		{
 			printf("Failed to get FreeRDP file descriptor\n");
 			break;
 		}
-		if (freerdp_chanman_get_fds(chanman, instance, rfds, &rcount, wfds, &wcount) != True)
+		if (freerdp_channels_get_fds(channels, instance, rfds, &rcount, wfds, &wcount) != true)
 		{
 			printf("Failed to get channel manager file descriptor\n");
 			break;
@@ -250,21 +258,21 @@ int tfreerdp_run(freerdp* instance)
 			}
 		}
 
-		if (instance->CheckFileDescriptor(instance) != True)
+		if (freerdp_check_fds(instance) != true)
 		{
 			printf("Failed to check FreeRDP file descriptor\n");
 			break;
 		}
-		if (freerdp_chanman_check_fds(chanman, instance) != True)
+		if (freerdp_channels_check_fds(channels, instance) != true)
 		{
 			printf("Failed to check channel manager file descriptor\n");
 			break;
 		}
-		tf_process_channel_event(chanman, instance);
+		tf_process_channel_event(channels, instance);
 	}
 
-	freerdp_chanman_close(chanman, instance);
-	freerdp_chanman_free(chanman);
+	freerdp_channels_close(channels, instance);
+	freerdp_channels_free(channels);
 	freerdp_free(instance);
 
 	return 0;
@@ -294,9 +302,9 @@ int main(int argc, char* argv[])
 	pthread_t thread;
 	freerdp* instance;
 	struct thread_data* data;
-	rdpChanMan* chanman;
+	rdpChannels* channels;
 
-	freerdp_chanman_global_init();
+	freerdp_channels_global_init();
 
 	g_sem = freerdp_sem_new(1);
 
@@ -305,10 +313,13 @@ int main(int argc, char* argv[])
 	instance->PostConnect = tf_post_connect;
 	instance->ReceiveChannelData = tf_receive_channel_data;
 
-	chanman = freerdp_chanman_new();
-	SET_CHANMAN(instance, chanman);
+	instance->context_size = sizeof(tfContext);
+	instance->ContextNew = tf_context_new;
+	instance->ContextFree = tf_context_free;
+	freerdp_context_new(instance);
 
-	freerdp_parse_args(instance->settings, argc, argv, tf_process_plugin_args, chanman, NULL, NULL);
+	channels = instance->context->channels;
+	freerdp_parse_args(instance->settings, argc, argv, tf_process_plugin_args, channels, NULL, NULL);
 
 	data = (struct thread_data*) xzalloc(sizeof(struct thread_data));
 	data->instance = instance;
@@ -321,7 +332,7 @@ int main(int argc, char* argv[])
                 freerdp_sem_wait(g_sem);
 	}
 
-	freerdp_chanman_global_uninit();
+	freerdp_channels_global_uninit();
 
 	return 0;
 }

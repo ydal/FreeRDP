@@ -20,6 +20,10 @@
 #ifndef __INPUT_API_H
 #define __INPUT_API_H
 
+typedef struct rdp_input rdpInput;
+
+#include <freerdp/freerdp.h>
+
 /* keyboard Flags */
 #define KBD_FLAGS_EXTENDED		0x0100
 #define KBD_FLAGS_DOWN			0x4000
@@ -48,25 +52,24 @@
 
 #define RDP_CLIENT_INPUT_PDU_HEADER_LENGTH	4
 
-typedef struct rdp_input rdpInput;
-
-typedef void (*pcSynchronizeEvent)(rdpInput* input, uint32 flags);
-typedef void (*pcKeyboardEvent)(rdpInput* input, uint16 flags, uint16 code);
-typedef void (*pcUnicodeKeyboardEvent)(rdpInput* input, uint16 code);
-typedef void (*pcMouseEvent)(rdpInput* input, uint16 flags, uint16 x, uint16 y);
-typedef void (*pcExtendedMouseEvent)(rdpInput* input, uint16 flags, uint16 x, uint16 y);
+typedef void (*pSynchronizeEvent)(rdpInput* input, uint32 flags);
+typedef void (*pKeyboardEvent)(rdpInput* input, uint16 flags, uint16 code);
+typedef void (*pUnicodeKeyboardEvent)(rdpInput* input, uint16 code);
+typedef void (*pMouseEvent)(rdpInput* input, uint16 flags, uint16 x, uint16 y);
+typedef void (*pExtendedMouseEvent)(rdpInput* input, uint16 flags, uint16 x, uint16 y);
 
 struct rdp_input
 {
-	void* rdp;
-	void* param1;
-	void* param2;
+	rdpContext* context; /* 0 */
+	void* param1; /* 1 */
+	uint32 paddingA[16 - 2]; /* 2 */
 
-	pcSynchronizeEvent SynchronizeEvent;
-	pcKeyboardEvent KeyboardEvent;
-	pcUnicodeKeyboardEvent UnicodeKeyboardEvent;
-	pcMouseEvent MouseEvent;
-	pcExtendedMouseEvent ExtendedMouseEvent;
+	pSynchronizeEvent SynchronizeEvent; /* 16 */
+	pKeyboardEvent KeyboardEvent; /* 17 */
+	pUnicodeKeyboardEvent UnicodeKeyboardEvent; /* 18 */
+	pMouseEvent MouseEvent; /* 19 */
+	pExtendedMouseEvent ExtendedMouseEvent; /* 20 */
+	uint32 paddingB[32 - 21]; /* 21 */
 };
 
 #endif /* __INPUT_API_H */

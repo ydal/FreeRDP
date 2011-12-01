@@ -8,7 +8,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ *	 http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -23,9 +23,12 @@
 #include <freerdp/api.h>
 #include <freerdp/freerdp.h>
 #include <freerdp/constants.h>
-#include <freerdp/gdi/color.h>
+#include <freerdp/utils/memory.h>
 #include <freerdp/utils/bitmap.h>
-#include <freerdp/rfx/rfx.h>
+#include <freerdp/codec/color.h>
+#include <freerdp/codec/bitmap.h>
+#include <freerdp/codec/rfx.h>
+#include <freerdp/codec/nsc.h>
 
 #include <freerdp/gdi/dc.h>
 #include <freerdp/gdi/pen.h>
@@ -40,8 +43,10 @@
 
 #include <freerdp/gdi/gdi.h>
 
+#include "gdi.h"
+
 /* Ternary Raster Operation Table */
-const uint32 rop3_code_table[] =
+static const uint32 rop3_code_table[] =
 {
 	0x00000042, /* 0 */
 	0x00010289, /* DPSoon */
@@ -308,39 +313,9 @@ INLINE uint32 gdi_rop3_code(uint8 code)
 	return rop3_code_table[code];
 }
 
-INLINE void gdi_copy_mem(uint8 * d, uint8 * s, int n)
-{
-	memmove(d, s, n);
-}
-
-INLINE void gdi_copy_mem_backwards(uint8 * d, uint8 * s, int n)
-{
-	d = (d + n) - 1;
-	s = (s + n) - 1;
-	
-	while (n & (~7))
-	{
-		*(d--) = *(s--);
-		*(d--) = *(s--);
-		*(d--) = *(s--);
-		*(d--) = *(s--);
-		*(d--) = *(s--);
-		*(d--) = *(s--);
-		*(d--) = *(s--);
-		*(d--) = *(s--);
-		n = n - 8;
-	}
-
-	while (n > 0)
-	{
-		*(d--) = *(s--);
-		n--;
-	}
-}
-
 INLINE uint8* gdi_get_bitmap_pointer(HGDI_DC hdcBmp, int x, int y)
 {
-	uint8 * p;
+	uint8* p;
 	HGDI_BITMAP hBmp = (HGDI_BITMAP) hdcBmp->selectedObject;
 	
 	if (x >= 0 && x < hBmp->width && y >= 0 && y < hBmp->height)
@@ -391,42 +366,29 @@ INLINE int gdi_is_mono_pixel_set(uint8* data, int x, int y, int width)
 	return (data[byte] & (0x80 >> shift)) != 0;
 }
 
-HGDI_BITMAP gdi_create_bitmap(GDI* gdi, int width, int height, int bpp, uint8* data)
+gdiBitmap* gdi_glyph_new(rdpGdi* gdi, GLYPH_DATA* glyph)
 {
-	uint8* bmpData;
-	HGDI_BITMAP bitmap;
-	
-	bmpData = gdi_image_convert(data, NULL, width, height, gdi->srcBpp, bpp, gdi->clrconv);
-	bitmap = gdi_CreateBitmap(width, height, gdi->dstBpp, bmpData);
-	
-	return bitmap;
-}
+	uint8* extra;
+	gdiBitmap* gdi_bmp;
 
-GDI_IMAGE* gdi_bitmap_new(GDI *gdi, int width, int height, int bpp, uint8* data)
-{
-	GDI_IMAGE *gdi_bmp;
-	
-	gdi_bmp = (GDI_IMAGE*) malloc(sizeof(GDI_IMAGE));
-	gdi_bmp->hdc = gdi_CreateCompatibleDC(gdi->hdc);
-	
-	DEBUG_GDI("gdi_bitmap_new: width:%d height:%d bpp:%d", width, height, bpp);
+	gdi_bmp = (gdiBitmap*) malloc(sizeof(gdiBitmap));
 
-	if (data == NULL)
-	{
-		gdi_bmp->bitmap = gdi_CreateCompatibleBitmap(gdi->hdc, width, height);
-	}
-	else
-	{
-		gdi_bmp->bitmap = gdi_create_bitmap(gdi, width, height, bpp, data);
-	}
-	
+	gdi_bmp->hdc = gdi_GetDC();
+	gdi_bmp->hdc->bytesPerPixel = 1;
+	gdi_bmp->hdc->bitsPerPixel = 1;
+
+	extra = freerdp_glyph_convert(glyph->cx, glyph->cy, glyph->aj);
+	gdi_bmp->bitmap = gdi_CreateBitmap(glyph->cx, glyph->cy, 1, extra);
+	gdi_bmp->bitmap->bytesPerPixel = 1;
+	gdi_bmp->bitmap->bitsPerPixel = 1;
+
 	gdi_SelectObject(gdi_bmp->hdc, (HGDIOBJECT) gdi_bmp->bitmap);
 	gdi_bmp->org_bitmap = NULL;
 
 	return gdi_bmp;
 }
 
-void gdi_bitmap_free(GDI_IMAGE *gdi_bmp)
+void gdi_glyph_free(gdiBitmap *gdi_bmp)
 {
 	if (gdi_bmp != 0)
 	{
@@ -437,35 +399,47 @@ void gdi_bitmap_free(GDI_IMAGE *gdi_bmp)
 	}
 }
 
-void gdi_bitmap_update(rdpUpdate* update, BITMAP_UPDATE* bitmap)
+gdiBitmap* gdi_bitmap_new_ex(rdpGdi* gdi, int width, int height, int bpp, uint8* data)
 {
-	int i;
-	BITMAP_DATA* bmp;
-	GDI_IMAGE* gdi_bmp;
-	GDI* gdi = GET_GDI(update);
+	gdiBitmap* bitmap;
 
-	for (i = 0; i < bitmap->number; i++)
+	bitmap = (gdiBitmap*) malloc(sizeof(gdiBitmap));
+	bitmap->hdc = gdi_CreateCompatibleDC(gdi->hdc);
+
+	DEBUG_GDI("gdi_bitmap_new: width:%d height:%d bpp:%d", width, height, bpp);
+
+	if (data == NULL)
+		bitmap->bitmap = gdi_CreateCompatibleBitmap(gdi->hdc, width, height);
+	else
+		bitmap->bitmap = gdi_create_bitmap(gdi, width, height, bpp, data);
+
+	gdi_SelectObject(bitmap->hdc, (HGDIOBJECT) bitmap->bitmap);
+	bitmap->org_bitmap = NULL;
+
+	return bitmap;
+}
+
+void gdi_bitmap_free_ex(gdiBitmap* bitmap)
+{
+	if (bitmap != NULL)
 	{
-		bmp = &bitmap->bitmaps[i];
-
-		gdi_bmp = gdi_bitmap_new(gdi, bmp->width, bmp->height, gdi->dstBpp, bmp->data);
-
-		gdi_BitBlt(gdi->primary->hdc,
-				bmp->left, bmp->top, bmp->right - bmp->left + 1,
-				bmp->bottom - bmp->top + 1, gdi_bmp->hdc, 0, 0, GDI_SRCCOPY);
-
-		gdi_bitmap_free((GDI_IMAGE*) gdi_bmp);
+		gdi_SelectObject(bitmap->hdc, (HGDIOBJECT) bitmap->org_bitmap);
+		gdi_DeleteObject((HGDIOBJECT) bitmap->bitmap);
+		gdi_DeleteDC(bitmap->hdc);
+		free(bitmap);
 	}
 }
 
-void gdi_palette_update(rdpUpdate* update, PALETTE_UPDATE* palette)
+void gdi_palette_update(rdpContext* context, PALETTE_UPDATE* palette)
 {
-
+	rdpGdi* gdi = context->gdi;
+	gdi->clrconv->palette->count = palette->number;
+	gdi->clrconv->palette->entries = palette->entries;
 }
 
-void gdi_set_bounds(rdpUpdate* update, BOUNDS* bounds)
+void gdi_set_bounds(rdpContext* context, rdpBounds* bounds)
 {
-	GDI* gdi = GET_GDI(update);
+	rdpGdi* gdi = context->gdi;
 
 	if (bounds != NULL)
 	{
@@ -478,35 +452,29 @@ void gdi_set_bounds(rdpUpdate* update, BOUNDS* bounds)
 	}
 }
 
-void gdi_dstblt(rdpUpdate* update, DSTBLT_ORDER* dstblt)
+void gdi_dstblt(rdpContext* context, DSTBLT_ORDER* dstblt)
 {
-	GDI* gdi = GET_GDI(update);
+	rdpGdi* gdi = context->gdi;
 
 	gdi_BitBlt(gdi->drawing->hdc, dstblt->nLeftRect, dstblt->nTopRect,
 			dstblt->nWidth, dstblt->nHeight, NULL, 0, 0, gdi_rop3_code(dstblt->bRop));
 }
 
-void gdi_patblt(rdpUpdate* update, PATBLT_ORDER* patblt)
+void gdi_patblt(rdpContext* context, PATBLT_ORDER* patblt)
 {
 	uint8* data;
-	BRUSH* brush;
+	rdpBrush* brush;
 	HGDI_BRUSH originalBrush;
-	GDI* gdi = GET_GDI(update);
+	rdpGdi* gdi = context->gdi;
 
 	brush = &patblt->brush;
-
-	if (brush->style & CACHED_BRUSH)
-	{
-		brush->data = brush_get(gdi->cache->brush, brush->index, &brush->bpp);
-		brush->style = GDI_BS_PATTERN;
-	}
 
 	if (brush->style == GDI_BS_SOLID)
 	{
 		uint32 color;
 		originalBrush = gdi->drawing->hdc->brush;
 
-		color = gdi_color_convert(patblt->foreColor, gdi->srcBpp, 32, gdi->clrconv);
+		color = freerdp_color_convert(patblt->foreColor, gdi->srcBpp, 32, gdi->clrconv);
 		gdi->drawing->hdc->brush = gdi_CreateSolidBrush(color);
 
 		gdi_PatBlt(gdi->drawing->hdc, patblt->nLeftRect, patblt->nTopRect,
@@ -521,11 +489,11 @@ void gdi_patblt(rdpUpdate* update, PATBLT_ORDER* patblt)
 
 		if (brush->bpp > 1)
 		{
-			data = gdi_image_convert(brush->data, NULL, 8, 8, gdi->srcBpp, gdi->dstBpp, gdi->clrconv);
+			data = freerdp_image_convert(brush->data, NULL, 8, 8, gdi->srcBpp, gdi->dstBpp, gdi->clrconv);
 		}
 		else
 		{
-			data = gdi_mono_image_convert(brush->data, 8, 8, gdi->srcBpp, gdi->dstBpp,
+			data = freerdp_mono_image_convert(brush->data, 8, 8, gdi->srcBpp, gdi->dstBpp,
 				patblt->backColor, patblt->foreColor, gdi->clrconv);
 		}
 
@@ -546,26 +514,26 @@ void gdi_patblt(rdpUpdate* update, PATBLT_ORDER* patblt)
 	}
 }
 
-void gdi_scrblt(rdpUpdate* update, SCRBLT_ORDER* scrblt)
+void gdi_scrblt(rdpContext* context, SCRBLT_ORDER* scrblt)
 {
-	GDI* gdi = GET_GDI(update);
+	rdpGdi* gdi = context->gdi;
 
 	gdi_BitBlt(gdi->drawing->hdc, scrblt->nLeftRect, scrblt->nTopRect,
 			scrblt->nWidth, scrblt->nHeight, gdi->primary->hdc,
 			scrblt->nXSrc, scrblt->nYSrc, gdi_rop3_code(scrblt->bRop));
 }
 
-void gdi_opaque_rect(rdpUpdate* update, OPAQUE_RECT_ORDER* opaque_rect)
+void gdi_opaque_rect(rdpContext* context, OPAQUE_RECT_ORDER* opaque_rect)
 {
 	GDI_RECT rect;
 	HGDI_BRUSH hBrush;
 	uint32 brush_color;
-	GDI *gdi = GET_GDI(update);
+	rdpGdi *gdi = context->gdi;
 
 	gdi_CRgnToRect(opaque_rect->nLeftRect, opaque_rect->nTopRect,
 			opaque_rect->nWidth, opaque_rect->nHeight, &rect);
 
-	brush_color = gdi_color_convert(opaque_rect->color, gdi->srcBpp, 32, gdi->clrconv);
+	brush_color = freerdp_color_convert(opaque_rect->color, gdi->srcBpp, 32, gdi->clrconv);
 
 	hBrush = gdi_CreateSolidBrush(brush_color);
 	gdi_FillRect(gdi->drawing->hdc, &rect, hBrush);
@@ -573,14 +541,14 @@ void gdi_opaque_rect(rdpUpdate* update, OPAQUE_RECT_ORDER* opaque_rect)
 	gdi_DeleteObject((HGDIOBJECT) hBrush);
 }
 
-void gdi_multi_opaque_rect(rdpUpdate* update, MULTI_OPAQUE_RECT_ORDER* multi_opaque_rect)
+void gdi_multi_opaque_rect(rdpContext* context, MULTI_OPAQUE_RECT_ORDER* multi_opaque_rect)
 {
 	int i;
 	GDI_RECT rect;
 	HGDI_BRUSH hBrush;
 	uint32 brush_color;
 	DELTA_RECT* rectangle;
-	GDI *gdi = GET_GDI(update);
+	rdpGdi *gdi = context->gdi;
 
 	for (i = 1; i < multi_opaque_rect->numRectangles + 1; i++)
 	{
@@ -589,7 +557,7 @@ void gdi_multi_opaque_rect(rdpUpdate* update, MULTI_OPAQUE_RECT_ORDER* multi_opa
 		gdi_CRgnToRect(rectangle->left, rectangle->top,
 				rectangle->width, rectangle->height, &rect);
 
-		brush_color = gdi_color_convert(multi_opaque_rect->color, gdi->srcBpp, 32, gdi->clrconv);
+		brush_color = freerdp_color_convert(multi_opaque_rect->color, gdi->srcBpp, 32, gdi->clrconv);
 
 		hBrush = gdi_CreateSolidBrush(brush_color);
 		gdi_FillRect(gdi->drawing->hdc, &rect, hBrush);
@@ -598,13 +566,13 @@ void gdi_multi_opaque_rect(rdpUpdate* update, MULTI_OPAQUE_RECT_ORDER* multi_opa
 	}
 }
 
-void gdi_line_to(rdpUpdate* update, LINE_TO_ORDER* line_to)
+void gdi_line_to(rdpContext* context, LINE_TO_ORDER* line_to)
 {
 	uint32 color;
 	HGDI_PEN hPen;
-	GDI *gdi = GET_GDI(update);
+	rdpGdi *gdi = context->gdi;
 
-	color = gdi_color_convert(line_to->penColor, gdi->srcBpp, 32, gdi->clrconv);
+	color = freerdp_color_convert(line_to->penColor, gdi->srcBpp, 32, gdi->clrconv);
 	hPen = gdi_CreatePen(line_to->penStyle, line_to->penWidth, (GDI_COLOR) color);
 	gdi_SelectObject(gdi->drawing->hdc, (HGDIOBJECT) hPen);
 	gdi_SetROP2(gdi->drawing->hdc, line_to->bRop2);
@@ -615,157 +583,70 @@ void gdi_line_to(rdpUpdate* update, LINE_TO_ORDER* line_to)
 	gdi_DeleteObject((HGDIOBJECT) hPen);
 }
 
-void gdi_polyline(rdpUpdate* update, POLYLINE_ORDER* polyline)
+void gdi_polyline(rdpContext* context, POLYLINE_ORDER* polyline)
 {
 	int i;
 	uint32 color;
 	HGDI_PEN hPen;
 	DELTA_POINT* points;
-	GDI *gdi = GET_GDI(update);
+	rdpGdi* gdi = context->gdi;
+	sint32 x;
+	sint32 y;
 
-	color = gdi_color_convert(polyline->penColor, gdi->srcBpp, 32, gdi->clrconv);
-	hPen = gdi_CreatePen(0, 1, (GDI_COLOR) color);
+	color = freerdp_color_convert(polyline->penColor, gdi->srcBpp, 32, gdi->clrconv);
+	hPen = gdi_CreatePen(GDI_PS_SOLID, 1, (GDI_COLOR) color);
 	gdi_SelectObject(gdi->drawing->hdc, (HGDIOBJECT) hPen);
 	gdi_SetROP2(gdi->drawing->hdc, polyline->bRop2);
+
+	x = polyline->xStart;
+	y = polyline->yStart;
+	gdi_MoveToEx(gdi->drawing->hdc, x, y, NULL);
 
 	points = polyline->points;
 	for (i = 0; i < polyline->numPoints; i++)
 	{
-		gdi_MoveToEx(gdi->drawing->hdc, points[i].x, points[i].y, NULL);
-		gdi_LineTo(gdi->drawing->hdc, points[i + 1].x, points[i + 1].y);
+		x += points[i].x;
+		y += points[i].y;
+		gdi_LineTo(gdi->drawing->hdc, x, y);
+		gdi_MoveToEx(gdi->drawing->hdc, x, y, NULL);
 	}
 
 	gdi_DeleteObject((HGDIOBJECT) hPen);
 }
 
-void gdi_fast_index(rdpUpdate* update, FAST_INDEX_ORDER* fast_index)
+void gdi_memblt(rdpContext* context, MEMBLT_ORDER* memblt)
 {
-	uint32 color;
-	GDI* gdi = GET_GDI(update);
+	gdiBitmap* bitmap;
+	rdpGdi* gdi = context->gdi;
 
-	color = gdi_color_convert(fast_index->foreColor, gdi->srcBpp, 32, gdi->clrconv);
-	gdi->textColor = gdi_SetTextColor(gdi->drawing->hdc, color);
+	bitmap = (gdiBitmap*) memblt->bitmap;
 
-
-
-	gdi_SetTextColor(gdi->drawing->hdc, gdi->textColor);
+	gdi_BitBlt(gdi->drawing->hdc, memblt->nLeftRect, memblt->nTopRect,
+			memblt->nWidth, memblt->nHeight, bitmap->hdc,
+			memblt->nXSrc, memblt->nYSrc, gdi_rop3_code(memblt->bRop));
 }
 
-void gdi_create_offscreen_bitmap(rdpUpdate* update, CREATE_OFFSCREEN_BITMAP_ORDER* create_offscreen_bitmap)
+void gdi_mem3blt(rdpContext* context, MEM3BLT_ORDER* mem3blt)
 {
-	GDI_IMAGE* gdi_bmp;
-	GDI* gdi = GET_GDI(update);
 
-	gdi_bmp = gdi_bitmap_new(gdi, create_offscreen_bitmap->cx, create_offscreen_bitmap->cy, gdi->dstBpp, NULL);
-
-	offscreen_put(gdi->cache->offscreen, create_offscreen_bitmap->id, (void*) gdi_bmp);
 }
 
-void gdi_switch_surface(rdpUpdate* update, SWITCH_SURFACE_ORDER* switch_surface)
+void gdi_surface_frame_marker(rdpContext* context, SURFACE_FRAME_MARKER* surface_frame_marker)
 {
-	GDI_IMAGE* gdi_bmp;
-	GDI* gdi = GET_GDI(update);
 
-	if (switch_surface->bitmapId == SCREEN_BITMAP_SURFACE)
-	{
-		gdi->drawing = (GDI_IMAGE*) gdi->primary;
-	}
-	else
-	{
-		gdi_bmp = (GDI_IMAGE*) offscreen_get(gdi->cache->offscreen, switch_surface->bitmapId);
-		gdi->drawing = gdi_bmp;
-	}
-}
-
-void gdi_cache_bitmap_v2(rdpUpdate* update, CACHE_BITMAP_V2_ORDER* cache_bitmap_v2)
-{
-	GDI* gdi = GET_GDI(update);
-
-	bitmap_v2_put(gdi->cache->bitmap_v2, cache_bitmap_v2->cacheId,
-			cache_bitmap_v2->cacheIndex, cache_bitmap_v2->bitmapDataStream);
-}
-
-void gdi_cache_color_table(rdpUpdate* update, CACHE_COLOR_TABLE_ORDER* cache_color_table)
-{
-	GDI* gdi = GET_GDI(update);
-	color_table_put(gdi->cache->color_table, cache_color_table->cacheIndex, (void*) cache_color_table->colorTable);
-}
-
-void gdi_cache_glyph(rdpUpdate* update, CACHE_GLYPH_ORDER* cache_glyph)
-{
-	int i;
-	uint8* extra;
-	GLYPH_DATA* glyph;
-	GDI_IMAGE* gdi_bmp;
-	GDI* gdi = GET_GDI(update);
-
-	for (i = 0; i < cache_glyph->cGlyphs; i++)
-	{
-		glyph = cache_glyph->glyphData[i];
-		gdi_bmp = (GDI_IMAGE*) malloc(sizeof(GDI_IMAGE));
-
-		gdi_bmp->hdc = gdi_GetDC();
-		gdi_bmp->hdc->bytesPerPixel = 1;
-		gdi_bmp->hdc->bitsPerPixel = 1;
-
-		extra = gdi_glyph_convert(glyph->cx, glyph->cy, glyph->aj);
-		gdi_bmp->bitmap = gdi_CreateBitmap(glyph->cx, glyph->cy, 1, extra);
-		gdi_bmp->bitmap->bytesPerPixel = 1;
-		gdi_bmp->bitmap->bitsPerPixel = 1;
-
-		gdi_SelectObject(gdi_bmp->hdc, (HGDIOBJECT) gdi_bmp->bitmap);
-		gdi_bmp->org_bitmap = NULL;
-
-		glyph_put(gdi->cache->glyph, cache_glyph->cacheId, glyph->cacheIndex, glyph, (void*) gdi_bmp);
-	}
-}
-
-void gdi_cache_glyph_v2(rdpUpdate* update, CACHE_GLYPH_V2_ORDER* cache_glyph_v2)
-{
-	int i;
-	uint8* extra;
-	GLYPH_DATA_V2* glyph;
-	GDI_IMAGE* gdi_bmp;
-	GDI* gdi = GET_GDI(update);
-
-	for (i = 0; i < cache_glyph_v2->cGlyphs; i++)
-	{
-		glyph = cache_glyph_v2->glyphData[i];
-		gdi_bmp = (GDI_IMAGE*) malloc(sizeof(GDI_IMAGE));
-
-		gdi_bmp->hdc = gdi_GetDC();
-		gdi_bmp->hdc->bytesPerPixel = 1;
-		gdi_bmp->hdc->bitsPerPixel = 1;
-
-		extra = gdi_glyph_convert(glyph->cx, glyph->cy, glyph->aj);
-		gdi_bmp->bitmap = gdi_CreateBitmap(glyph->cx, glyph->cy, 1, extra);
-		gdi_bmp->bitmap->bytesPerPixel = 1;
-		gdi_bmp->bitmap->bitsPerPixel = 1;
-
-		gdi_SelectObject(gdi_bmp->hdc, (HGDIOBJECT) gdi_bmp->bitmap);
-		gdi_bmp->org_bitmap = NULL;
-
-		glyph_put(gdi->cache->glyph, cache_glyph_v2->cacheId, glyph->cacheIndex, glyph, (void*) gdi_bmp);
-	}
-}
-
-void gdi_cache_brush(rdpUpdate* update, CACHE_BRUSH_ORDER* cache_brush)
-{
-	GDI* gdi = GET_GDI(update);
-	brush_put(gdi->cache->brush, cache_brush->index, cache_brush->data, cache_brush->bpp);
 }
 
 int tilenum = 0;
 
-void gdi_surface_bits(rdpUpdate* update, SURFACE_BITS_COMMAND* surface_bits_command)
+void gdi_surface_bits(rdpContext* context, SURFACE_BITS_COMMAND* surface_bits_command)
 {
 	int i, j;
 	int tx, ty;
-	STREAM* s;
 	char* tile_bitmap;
 	RFX_MESSAGE* message;
-	GDI* gdi = GET_GDI(update);
-	RFX_CONTEXT* context = (RFX_CONTEXT*) gdi->rfx_context;
+	rdpGdi* gdi = context->gdi;
+	RFX_CONTEXT* rfx_context = (RFX_CONTEXT*) gdi->rfx_context;
+	NSC_CONTEXT* nsc_context = (NSC_CONTEXT*) gdi->nsc_context;
 
 	DEBUG_GDI("destLeft %d destTop %d destRight %d destBottom %d "
 		"bpp %d codecID %d width %d height %d length %d",
@@ -775,86 +656,56 @@ void gdi_surface_bits(rdpUpdate* update, SURFACE_BITS_COMMAND* surface_bits_comm
 		surface_bits_command->width, surface_bits_command->height,
 		surface_bits_command->bitmapDataLength);
 
-	tile_bitmap = xzalloc(32);
+	tile_bitmap = (char*) xzalloc(32);
 
 	if (surface_bits_command->codecID == CODEC_ID_REMOTEFX)
 	{
-		s = stream_new(0);
-		stream_attach(s, surface_bits_command->bitmapData, surface_bits_command->bitmapDataLength);
-
-		message = rfx_process_message(context, s);
+		message = rfx_process_message(rfx_context,
+				surface_bits_command->bitmapData, surface_bits_command->bitmapDataLength);
 
 		DEBUG_GDI("num_rects %d num_tiles %d", message->num_rects, message->num_tiles);
 
-		if (message->num_rects > 1) /* RDVH */
+		/* blit each tile */
+		for (i = 0; i < message->num_tiles; i++)
 		{
-			/* blit each tile */
-			for (i = 0; i < message->num_tiles; i++)
-			{
-				tx = message->tiles[i]->x + surface_bits_command->destLeft;
-				ty = message->tiles[i]->y + surface_bits_command->destTop;
+			tx = message->tiles[i]->x + surface_bits_command->destLeft;
+			ty = message->tiles[i]->y + surface_bits_command->destTop;
 
-				gdi_image_convert(message->tiles[i]->data, gdi->tile->bitmap->data, 64, 64, 32, 32, gdi->clrconv);
+			freerdp_image_convert(message->tiles[i]->data, gdi->tile->bitmap->data, 64, 64, 32, 32, gdi->clrconv);
 
 #ifdef DUMP_REMOTEFX_TILES
-				sprintf(tile_bitmap, "/tmp/rfx/tile_%d.bmp", tilenum++);
-				freerdp_bitmap_write(tile_bitmap, gdi->tile->bitmap->data, 64, 64, 32);
+			sprintf(tile_bitmap, "/tmp/rfx/tile_%d.bmp", tilenum++);
+			freerdp_bitmap_write(tile_bitmap, gdi->tile->bitmap->data, 64, 64, 32);
 #endif
 
-				for (j = 0; j < message->num_rects; j++)
-				{
-					gdi_SetClipRgn(gdi->primary->hdc,
-						surface_bits_command->destLeft + message->rects[j].x,
-						surface_bits_command->destTop + message->rects[j].y,
-						message->rects[j].width, message->rects[j].height);
-
-					gdi_BitBlt(gdi->primary->hdc, tx, ty, 64, 64, gdi->tile->hdc, 0, 0, GDI_SRCCOPY);
-				}
-			}
-
-			for (i = 0; i < message->num_rects; i++)
+			for (j = 0; j < message->num_rects; j++)
 			{
-				gdi_InvalidateRegion(gdi->primary->hdc,
-					surface_bits_command->destLeft + message->rects[i].x,
-					surface_bits_command->destTop + message->rects[i].y,
-					message->rects[i].width, message->rects[i].height);
-			}
-		}
-		else if (message->num_rects == 1) /* RDSH */
-		{
-			gdi_SetClipRgn(gdi->primary->hdc,
-				surface_bits_command->destLeft + message->rects[0].x,
-				surface_bits_command->destTop + message->rects[0].y,
-				message->rects[0].width, message->rects[0].height);
-
-			/* blit each tile */
-			for (i = 0; i < message->num_tiles; i++)
-			{
-				tx = message->tiles[i]->x + surface_bits_command->destLeft;
-				ty = message->tiles[i]->y + surface_bits_command->destTop;
-
-				gdi_image_convert(message->tiles[i]->data, gdi->tile->bitmap->data, 64, 64, 32, 32, gdi->clrconv);
-
-#ifdef DUMP_REMOTEFX_TILES
-				sprintf(tile_bitmap, "/tmp/rfx/tile_%d.bmp", tilenum++);
-				freerdp_bitmap_write(tile_bitmap, gdi->tile->bitmap->data, 64, 64, 32);
-#endif
+				gdi_SetClipRgn(gdi->primary->hdc,
+					surface_bits_command->destLeft + message->rects[j].x,
+					surface_bits_command->destTop + message->rects[j].y,
+					message->rects[j].width, message->rects[j].height);
 
 				gdi_BitBlt(gdi->primary->hdc, tx, ty, 64, 64, gdi->tile->hdc, 0, 0, GDI_SRCCOPY);
-
 			}
-
-			gdi_InvalidateRegion(gdi->primary->hdc,
-				surface_bits_command->destLeft + message->rects[0].x,
-				surface_bits_command->destTop + message->rects[0].y,
-				message->rects[0].width, message->rects[0].height);
 		}
 
-		rfx_message_free(context, message);
-
-		stream_detach(s);
-		stream_free(s);
+		gdi_SetNullClipRgn(gdi->primary->hdc);
+		rfx_message_free(rfx_context, message);
 	}
+	else if (surface_bits_command->codecID == CODEC_ID_NSCODEC)
+	{
+		nsc_context->width = surface_bits_command->width;
+		nsc_context->height = surface_bits_command->height;
+		nsc_process_message(nsc_context, surface_bits_command->bitmapData, surface_bits_command->bitmapDataLength);
+		gdi->image->bitmap->width = surface_bits_command->width;
+		gdi->image->bitmap->height = surface_bits_command->height;
+		gdi->image->bitmap->bitsPerPixel = surface_bits_command->bpp;
+		gdi->image->bitmap->bytesPerPixel = gdi->image->bitmap->bitsPerPixel / 8;
+		gdi->image->bitmap->data = (uint8*) xrealloc(gdi->image->bitmap->data, gdi->image->bitmap->width * gdi->image->bitmap->height * 4);
+		freerdp_image_flip(nsc_context->bmpdata, gdi->image->bitmap->data, gdi->image->bitmap->width, gdi->image->bitmap->height, 32);
+		gdi_BitBlt(gdi->primary->hdc, surface_bits_command->destLeft, surface_bits_command->destTop, surface_bits_command->width, surface_bits_command->height, gdi->image->hdc, 0, 0, GDI_SRCCOPY);
+		nsc_context_destroy(nsc_context);
+	} 
 	else if (surface_bits_command->codecID == CODEC_ID_NONE)
 	{
 		gdi->image->bitmap->width = surface_bits_command->width;
@@ -865,18 +716,27 @@ void gdi_surface_bits(rdpUpdate* update, SURFACE_BITS_COMMAND* surface_bits_comm
 		gdi->image->bitmap->data = (uint8*) xrealloc(gdi->image->bitmap->data,
 				gdi->image->bitmap->width * gdi->image->bitmap->height * 4);
 
-		if (surface_bits_command->bpp != 32)
+		if ((surface_bits_command->bpp != 32) || (gdi->clrconv->alpha == true))
 		{
-			gdi_image_convert(surface_bits_command->bitmapData, gdi->image->bitmap->data,
+			uint8* temp_image;
+
+			freerdp_image_convert(surface_bits_command->bitmapData, gdi->image->bitmap->data,
 				gdi->image->bitmap->width, gdi->image->bitmap->height,
 				gdi->image->bitmap->bitsPerPixel, 32, gdi->clrconv);
 
 			surface_bits_command->bpp = 32;
 			surface_bits_command->bitmapData = gdi->image->bitmap->data;
-		}
 
-		gdi_image_invert(surface_bits_command->bitmapData, gdi->image->bitmap->data,
-				gdi->image->bitmap->width, gdi->image->bitmap->height, 32);
+			temp_image = (uint8*) xmalloc(gdi->image->bitmap->width * gdi->image->bitmap->height * 4);
+			freerdp_image_flip(gdi->image->bitmap->data, temp_image, gdi->image->bitmap->width, gdi->image->bitmap->height, 32);
+			xfree(gdi->image->bitmap->data);
+			gdi->image->bitmap->data = temp_image;
+		}
+		else
+		{
+			freerdp_image_flip(surface_bits_command->bitmapData, gdi->image->bitmap->data,
+					gdi->image->bitmap->width, gdi->image->bitmap->height, 32);
+		}
 
 		gdi_BitBlt(gdi->primary->hdc, surface_bits_command->destLeft, surface_bits_command->destTop,
 				surface_bits_command->width, surface_bits_command->height, gdi->image->hdc, 0, 0, GDI_SRCCOPY);
@@ -886,7 +746,8 @@ void gdi_surface_bits(rdpUpdate* update, SURFACE_BITS_COMMAND* surface_bits_comm
 		printf("Unsupported codecID %d\n", surface_bits_command->codecID);
 	}
 
-	xfree(tile_bitmap);
+	if (tile_bitmap != NULL)
+		xfree(tile_bitmap);
 }
 
 /**
@@ -897,46 +758,41 @@ void gdi_surface_bits(rdpUpdate* update, SURFACE_BITS_COMMAND* surface_bits_comm
 
 void gdi_register_update_callbacks(rdpUpdate* update)
 {
-	update->Bitmap = gdi_bitmap_update;
+	rdpPrimaryUpdate* primary = update->primary;
+
 	update->Palette = gdi_palette_update;
 	update->SetBounds = gdi_set_bounds;
-	update->DstBlt = gdi_dstblt;
-	update->PatBlt = gdi_patblt;
-	update->ScrBlt = gdi_scrblt;
-	update->OpaqueRect = gdi_opaque_rect;
-	update->DrawNineGrid = NULL;
-	update->MultiDstBlt = NULL;
-	update->MultiPatBlt = NULL;
-	update->MultiScrBlt = NULL;
-	update->MultiOpaqueRect = gdi_multi_opaque_rect;
-	update->MultiDrawNineGrid = NULL;
-	update->LineTo = gdi_line_to;
-	update->Polyline = NULL;
-	update->MemBlt = NULL;
-	update->Mem3Blt = NULL;
-	update->SaveBitmap = NULL;
-	update->GlyphIndex = NULL;
-	update->FastIndex = gdi_fast_index;
-	update->FastGlyph = NULL;
-	update->PolygonSC = NULL;
-	update->PolygonCB = NULL;
-	update->EllipseSC = NULL;
-	update->EllipseCB = NULL;
-	update->CreateOffscreenBitmap = gdi_create_offscreen_bitmap;
-	update->SwitchSurface = gdi_switch_surface;
 
-	update->CacheBitmapV2 = gdi_cache_bitmap_v2;
-	update->CacheColorTable = gdi_cache_color_table;
-	update->CacheGlyph = gdi_cache_glyph;
-	update->CacheGlyphV2 = gdi_cache_glyph_v2;
-	update->CacheBrush = gdi_cache_brush;
+	primary->DstBlt = gdi_dstblt;
+	primary->PatBlt = gdi_patblt;
+	primary->ScrBlt = gdi_scrblt;
+	primary->OpaqueRect = gdi_opaque_rect;
+	primary->DrawNineGrid = NULL;
+	primary->MultiDstBlt = NULL;
+	primary->MultiPatBlt = NULL;
+	primary->MultiScrBlt = NULL;
+	primary->MultiOpaqueRect = gdi_multi_opaque_rect;
+	primary->MultiDrawNineGrid = NULL;
+	primary->LineTo = gdi_line_to;
+	primary->Polyline = gdi_polyline;
+	primary->MemBlt = gdi_memblt;
+	primary->Mem3Blt = gdi_mem3blt;
+	primary->SaveBitmap = NULL;
+	primary->GlyphIndex = NULL;
+	primary->FastIndex = NULL;
+	primary->FastGlyph = NULL;
+	primary->PolygonSC = NULL;
+	primary->PolygonCB = NULL;
+	primary->EllipseSC = NULL;
+	primary->EllipseCB = NULL;
 
 	update->SurfaceBits = gdi_surface_bits;
+	update->SurfaceFrameMarker = gdi_surface_frame_marker;
 }
 
-static void gdi_init_primary(GDI* gdi)
+void gdi_init_primary(rdpGdi* gdi)
 {
-	gdi->primary = gdi_bitmap_new(gdi, gdi->width, gdi->height, gdi->dstBpp, NULL);
+	gdi->primary = gdi_bitmap_new_ex(gdi, gdi->width, gdi->height, gdi->dstBpp, gdi->primary_buffer);
 	gdi->primary_buffer = gdi->primary->bitmap->data;
 
 	if (gdi->drawing == NULL)
@@ -951,7 +807,7 @@ static void gdi_init_primary(GDI* gdi)
 	gdi->primary->hdc->hwnd->ninvalid = 0;
 }
 
-void gdi_resize(GDI* gdi, int width, int height)
+void gdi_resize(rdpGdi* gdi, int width, int height)
 {
 	if (gdi && gdi->primary)
 	{
@@ -962,7 +818,7 @@ void gdi_resize(GDI* gdi, int width, int height)
 
 			gdi->width = width;
 			gdi->height = height;
-			gdi_bitmap_free(gdi->primary);
+			gdi_bitmap_free_ex(gdi->primary);
 			gdi_init_primary(gdi);
 		}
 	}
@@ -974,15 +830,21 @@ void gdi_resize(GDI* gdi, int width, int height)
  * @return
  */
 
-int gdi_init(freerdp* instance, uint32 flags)
+int gdi_init(freerdp* instance, uint32 flags, uint8* buffer)
 {
-	GDI* gdi = (GDI*) malloc(sizeof(GDI));
-	memset(gdi, 0, sizeof(GDI));
-	SET_GDI(instance->update, gdi);
+	rdpGdi* gdi;
+	rdpCache* cache;
+
+	gdi = (rdpGdi*) malloc(sizeof(rdpGdi));
+	memset(gdi, 0, sizeof(rdpGdi));
+
+	instance->context->gdi = gdi;
+	cache = instance->context->cache;
 
 	gdi->width = instance->settings->width;
 	gdi->height = instance->settings->height;
 	gdi->srcBpp = instance->settings->color_depth;
+	gdi->primary_buffer = buffer;
 
 	/* default internal buffer format */
 	gdi->dstBpp = 32;
@@ -994,6 +856,11 @@ int gdi_init(freerdp* instance, uint32 flags)
 		{
 			gdi->dstBpp = 32;
 			gdi->bytesPerPixel = 4;
+		}
+		else if (flags & CLRBUF_24BPP)
+		{
+			gdi->dstBpp = 24;
+			gdi->bytesPerPixel = 3;
 		}
 		else if (flags & CLRBUF_16BPP)
 		{
@@ -1020,10 +887,10 @@ int gdi_init(freerdp* instance, uint32 flags)
 	gdi->hdc->bytesPerPixel = gdi->bytesPerPixel;
 
 	gdi->clrconv = (HCLRCONV) malloc(sizeof(CLRCONV));
-	gdi->clrconv->palette = NULL;
 	gdi->clrconv->alpha = (flags & CLRCONV_ALPHA) ? 1 : 0;
 	gdi->clrconv->invert = (flags & CLRCONV_INVERT) ? 1 : 0;
 	gdi->clrconv->rgb555 = (flags & CLRCONV_RGB555) ? 1 : 0;
+	gdi->clrconv->palette = (rdpPalette*) malloc(sizeof(rdpPalette));
 
 	gdi->hdc->alpha = gdi->clrconv->alpha;
 	gdi->hdc->invert = gdi->clrconv->invert;
@@ -1031,34 +898,46 @@ int gdi_init(freerdp* instance, uint32 flags)
 
 	gdi_init_primary(gdi);
 
-	gdi->tile = gdi_bitmap_new(gdi, 64, 64, 32, NULL);
-	gdi->image = gdi_bitmap_new(gdi, 64, 64, 32, NULL);
+	gdi->tile = gdi_bitmap_new_ex(gdi, 64, 64, 32, NULL);
+	gdi->image = gdi_bitmap_new_ex(gdi, 64, 64, 32, NULL);
+
+	if (cache == NULL)
+	{
+		cache = cache_new(instance->settings);
+		instance->context->cache = cache;
+	}
 
 	gdi_register_update_callbacks(instance->update);
 
-	gdi->cache = cache_new(instance->settings);
+	brush_cache_register_callbacks(instance->update);
+	glyph_cache_register_callbacks(instance->update);
+	bitmap_cache_register_callbacks(instance->update);
+	offscreen_cache_register_callbacks(instance->update);
+	palette_cache_register_callbacks(instance->update);
+
+	gdi_register_graphics(instance->context->graphics);
 
 	gdi->rfx_context = rfx_context_new();
+	gdi->nsc_context = nsc_context_new();
 
 	return 0;
 }
 
 void gdi_free(freerdp* instance)
 {
-	GDI *gdi = GET_GDI(instance->update);
+	rdpGdi* gdi = instance->context->gdi;
 
 	if (gdi)
 	{
-		gdi_bitmap_free(gdi->primary);
-		gdi_bitmap_free(gdi->tile);
-		gdi_bitmap_free(gdi->image);
+		gdi_bitmap_free_ex(gdi->primary);
+		gdi_bitmap_free_ex(gdi->tile);
+		gdi_bitmap_free_ex(gdi->image);
 		gdi_DeleteDC(gdi->hdc);
-		cache_free(gdi->cache);
 		rfx_context_free((RFX_CONTEXT*)gdi->rfx_context);
 		free(gdi->clrconv);
 		free(gdi);
 	}
 	
-	SET_GDI(instance->update, NULL);
+	instance->context->gdi = (rdpGdi*) NULL;
 }
 

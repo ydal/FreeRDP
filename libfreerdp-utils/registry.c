@@ -17,14 +17,12 @@
  * limitations under the License.
  */
 
+#include <freerdp/utils/file.h>
+
 #include <freerdp/utils/registry.h>
 
-#ifdef _WIN32
-#include <windows.h>
-#endif
-
-static char registry_dir[] = "freerdp";
-static char registry_file[] = "config.txt";
+static const char registry_dir[] = "freerdp";
+static const char registry_file[] = "config.txt";
 
 static REG_SECTION global[] =
 {
@@ -96,13 +94,14 @@ void registry_create(rdpRegistry* registry)
 		printf("registry_create: error opening [%s] for writing\n", registry->file);
 		return;
 	}
+
 	registry_print(registry, registry->fp);
 	fflush(registry->fp);
 }
 
 void registry_load(rdpRegistry* registry)
 {
-	registry->fp = fopen((char*)registry->file, "r+");
+	registry->fp = fopen((char*) registry->file, "r+");
 }
 
 void registry_open(rdpRegistry* registry)
@@ -127,13 +126,24 @@ void registry_init(rdpRegistry* registry)
 	char* home_path;
 	struct stat stat_info;
 
-	home_path = getenv("HOME");
-	registry->available = True;
+	if (registry->settings->home_path == NULL)
+		home_path = getenv("HOME");
+	else
+		home_path = registry->settings->home_path;
 
 	if (home_path == NULL)
 	{
 		printf("could not get home path\n");
-		registry->available = False;
+		registry->available = false;
+		return;
+	}
+
+	registry->available = true;
+
+	if (home_path == NULL)
+	{
+		printf("could not get home path\n");
+		registry->available = false;
 		return;
 	}
 
@@ -146,11 +156,7 @@ void registry_init(rdpRegistry* registry)
 
 	if (stat(registry->path, &stat_info) != 0)
 	{
-#ifndef _WIN32
-		mkdir(registry->path, S_IRUSR | S_IWUSR | S_IXUSR);
-#else
-		CreateDirectory(registry->path, 0);
-#endif
+		freerdp_mkdir(registry->path);
 		printf("creating directory %s\n", registry->path);
 	}
 

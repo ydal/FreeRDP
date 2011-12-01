@@ -20,6 +20,7 @@
 #include <freerdp/utils/print.h>
 
 #include "gcc.h"
+#include "certificate.h"
 
 /**
  * T.124 GCC is defined in:
@@ -141,45 +142,45 @@ boolean gcc_read_conference_create_request(STREAM* s, rdpSettings* settings)
 
 	/* ConnectData */
 	if (!per_read_choice(s, &choice))
-		return False;
+		return false;
 	if (!per_read_object_identifier(s, t124_02_98_oid))
-		return False;
+		return false;
 
 	/* ConnectData::connectPDU (OCTET_STRING) */
 	if (!per_read_length(s, &length))
-		return False;
+		return false;
 
 	/* ConnectGCCPDU */
 	if (!per_read_choice(s, &choice))
-		return False;
+		return false;
 	if (!per_read_selection(s, &selection))
-		return False;
+		return false;
 
 	/* ConferenceCreateRequest::conferenceName */
 	if (!per_read_numeric_string(s, 1)) /* ConferenceName::numeric */
-		return False;
+		return false;
 	if (!per_read_padding(s, 1)) /* padding */
-		return False;
+		return false;
 
 	/* UserData (SET OF SEQUENCE) */
 	if (!per_read_number_of_sets(s, &number) || number != 1) /* one set of UserData */
-		return False;
+		return false;
 	if (!per_read_choice(s, &choice) || choice != 0xC0) /* UserData::value present + select h221NonStandard (1) */
-		return False;
+		return false;
 
 	/* h221NonStandard */
 	if (!per_read_octet_string(s, h221_cs_key, 4, 4)) /* h221NonStandard, client-to-server H.221 key, "Duca" */
-		return False;
+		return false;
 
 	/* userData::value (OCTET_STRING) */
 	if (!per_read_length(s, &length))
-		return False;
+		return false;
 	if (stream_get_left(s) < length)
-		return False;
+		return false;
 	if (!gcc_read_client_data_blocks(s, settings, length))
-		return False;
+		return false;
 
-	return True;
+	return true;
 }
 
 /**
@@ -252,14 +253,18 @@ boolean gcc_read_conference_create_response(STREAM* s, rdpSettings* settings)
 	per_read_choice(s, &choice);
 
 	/* h221NonStandard */
-	per_read_octet_string(s, h221_sc_key, 4, 4); /* h221NonStandard, server-to-client H.221 key, "McDn" */
+	if (!per_read_octet_string(s, h221_sc_key, 4, 4)) /* h221NonStandard, server-to-client H.221 key, "McDn" */
+		return false;
 
 	/* userData (OCTET_STRING) */
 	per_read_length(s, &length);
 	if (!gcc_read_server_data_blocks(s, settings, length))
-		return False;
+	{
+		printf("gcc_read_conference_create_response: gcc_read_server_data_blocks failed\n");
+		return false;
+	}
 
-	return True;
+	return true;
 }
 
 void gcc_write_conference_create_response(STREAM* s, STREAM* user_data)
@@ -311,27 +316,27 @@ boolean gcc_read_client_data_blocks(STREAM* s, rdpSettings *settings, int length
 		{
 			case CS_CORE:
 				if (!gcc_read_client_core_data(s, settings, blockLength - 4))
-					return False;
+					return false;
 				break;
 
 			case CS_SECURITY:
 				if (!gcc_read_client_security_data(s, settings, blockLength - 4))
-					return False;
+					return false;
 				break;
 
 			case CS_NET:
 				if (!gcc_read_client_network_data(s, settings, blockLength - 4))
-					return False;
+					return false;
 				break;
 
 			case CS_CLUSTER:
 				if (!gcc_read_client_cluster_data(s, settings, blockLength - 4))
-					return False;
+					return false;
 				break;
 
 			case CS_MONITOR:
 				if (!gcc_read_client_monitor_data(s, settings, blockLength - 4))
-					return False;
+					return false;
 				break;
 
 			default:
@@ -342,7 +347,7 @@ boolean gcc_read_client_data_blocks(STREAM* s, rdpSettings *settings, int length
 		stream_set_pos(s, pos + blockLength);
 	}
 
-	return True;
+	return true;
 }
 
 void gcc_write_client_data_blocks(STREAM* s, rdpSettings *settings)
@@ -359,37 +364,52 @@ boolean gcc_read_server_data_blocks(STREAM* s, rdpSettings *settings, int length
 	uint16 type;
 	uint16 offset = 0;
 	uint16 blockLength;
+	uint8* holdp;
 
 	while (offset < length)
 	{
+		holdp = s->p;
+
 		if (!gcc_read_user_data_header(s, &type, &blockLength))
-			return False;
+		{
+			printf("gcc_read_server_data_blocks: gcc_read_user_data_header failed\n");
+			return false;
+		}
 
 		switch (type)
 		{
 			case SC_CORE:
 				if (!gcc_read_server_core_data(s, settings))
-					return False;
+				{
+					printf("gcc_read_server_data_blocks: gcc_read_server_core_data failed\n");
+					return false;
+				}
 				break;
 
 			case SC_SECURITY:
 				if (!gcc_read_server_security_data(s, settings))
-					return False;
+				{
+					printf("gcc_read_server_data_blocks: gcc_read_server_security_data failed\n");
+					return false;
+				}
 				break;
 
 			case SC_NET:
 				if (!gcc_read_server_network_data(s, settings))
-					return False;
+				{
+					printf("gcc_read_server_data_blocks: gcc_read_server_network_data failed\n");
+					return false;
+				}
 				break;
 
 			default:
 				break;
 		}
-
 		offset += blockLength;
+		s->p = holdp + blockLength;
 	}
 
-	return True;
+	return true;
 }
 
 void gcc_write_server_data_blocks(STREAM* s, rdpSettings *settings)
@@ -405,9 +425,9 @@ boolean gcc_read_user_data_header(STREAM* s, uint16* type, uint16* length)
 	stream_read_uint16(s, *length); /* length */
 
 	if (stream_get_left(s) < *length - 4)
-		return False;
+		return false;
 
-	return True;
+	return true;
 }
 
 /**
@@ -444,7 +464,7 @@ boolean gcc_read_client_core_data(STREAM* s, rdpSettings *settings, uint16 block
 
 	/* Length of all required fields, until imeFileName */
 	if (blockLength < 128)
-		return False;
+		return false;
 
 	stream_read_uint32(s, version); /* version */
 	settings->rdp_version = (version == RDP_VERSION_4 ? 4 : 7);
@@ -533,7 +553,7 @@ boolean gcc_read_client_core_data(STREAM* s, rdpSettings *settings, uint16 block
 		blockLength -= 4;
 
 		if (settings->selected_protocol != serverSelectedProtocol)
-			return False;
+			return false;
 	} while (0);
 
 	if (highColorDepth > 0)
@@ -558,7 +578,7 @@ boolean gcc_read_client_core_data(STREAM* s, rdpSettings *settings, uint16 block
 				settings->color_depth = 24;
 				break;
 			default:
-				return False;
+				return false;
 		}
 	}
 	else
@@ -572,11 +592,11 @@ boolean gcc_read_client_core_data(STREAM* s, rdpSettings *settings, uint16 block
 				settings->color_depth = 8;
 				break;
 			default:
-				return False;
+				return false;
 		}
 	}
 
-	return True;
+	return true;
 }
 
 /**
@@ -690,7 +710,7 @@ boolean gcc_read_server_core_data(STREAM* s, rdpSettings *settings)
 	else if (version == RDP_VERSION_5_PLUS && settings->rdp_version < 5)
 		settings->rdp_version = 7;
 
-	return True;
+	return true;
 }
 
 void gcc_write_server_core_data(STREAM* s, rdpSettings *settings)
@@ -711,13 +731,13 @@ void gcc_write_server_core_data(STREAM* s, rdpSettings *settings)
 boolean gcc_read_client_security_data(STREAM* s, rdpSettings *settings, uint16 blockLength)
 {
 	if (blockLength < 8)
-		return False;
+		return false;
 
 	stream_read_uint32(s, settings->encryption_method); /* encryptionMethods */
 	if (settings->encryption_method == 0)
 		stream_read_uint32(s, settings->encryption_method); /* extEncryptionMethods */
 
-	return True;
+	return true;
 }
 
 /**
@@ -731,7 +751,7 @@ void gcc_write_client_security_data(STREAM* s, rdpSettings *settings)
 {
 	gcc_write_user_data_header(s, CS_SECURITY, 12);
 
-	if (settings->encryption > 0)
+	if (settings->encryption)
 	{
 		stream_write_uint32(s, settings->encryption_method); /* encryptionMethods */
 		stream_write_uint32(s, 0); /* extEncryptionMethods */
@@ -746,18 +766,21 @@ void gcc_write_client_security_data(STREAM* s, rdpSettings *settings)
 
 boolean gcc_read_server_security_data(STREAM* s, rdpSettings *settings)
 {
-	uint32 encryptionMethod;
-	uint32 encryptionLevel;
 	uint32 serverRandomLen;
 	uint32 serverCertLen;
+	uint8* data;
+	uint32 len;
 
-	stream_read_uint32(s, encryptionMethod); /* encryptionMethod */
-	stream_read_uint32(s, encryptionLevel); /* encryptionLevel */
+	stream_read_uint32(s, settings->encryption_method); /* encryptionMethod */
+	stream_read_uint32(s, settings->encryption_level); /* encryptionLevel */
 
-	if (encryptionMethod == 0 && encryptionLevel == 0)
+	if (settings->encryption_method == 0 && settings->encryption_level == 0)
 	{
 		/* serverRandom and serverRandom must not be present */
-		return True;
+		settings->encryption = false;
+		settings->encryption_method = ENCRYPTION_METHOD_NONE;
+		settings->encryption_level = ENCRYPTION_LEVEL_NONE;
+		return true;
 	}
 
 	stream_read_uint32(s, serverRandomLen); /* serverRandomLen */
@@ -770,6 +793,10 @@ boolean gcc_read_server_security_data(STREAM* s, rdpSettings *settings)
 		memcpy(settings->server_random.data, s->p, serverRandomLen);
 		stream_seek(s, serverRandomLen);
 	}
+	else
+	{
+		return false;
+	}
 
 	if (serverCertLen > 0)
 	{
@@ -777,9 +804,21 @@ boolean gcc_read_server_security_data(STREAM* s, rdpSettings *settings)
 		freerdp_blob_alloc(&settings->server_certificate, serverCertLen);
 		memcpy(settings->server_certificate.data, s->p, serverCertLen);
 		stream_seek(s, serverCertLen);
+		certificate_free(settings->server_cert);
+		settings->server_cert = certificate_new();
+		data = settings->server_certificate.data;
+		len = settings->server_certificate.length;
+		if (!certificate_read_server_certificate(settings->server_cert, data, len))
+		{
+			return false;
+		}
+	}
+	else
+	{
+		return false;
 	}
 
-	return True;
+	return true;
 }
 
 void gcc_write_server_security_data(STREAM* s, rdpSettings *settings)
@@ -806,13 +845,13 @@ boolean gcc_read_client_network_data(STREAM* s, rdpSettings *settings, uint16 bl
 	int i;
 
 	if (blockLength < 4)
-		return False;
+		return false;
 
 	stream_read_uint32(s, settings->num_channels); /* channelCount */
 	if (blockLength < 4 + settings->num_channels * 12)
-		return False;
+		return false;
 	if (settings->num_channels > 16)
-		return False;
+		return false;
 
 	/* channelDefArray */
 	for (i = 0; i < settings->num_channels; i++)
@@ -820,10 +859,10 @@ boolean gcc_read_client_network_data(STREAM* s, rdpSettings *settings, uint16 bl
 		/* CHANNEL_DEF */
 		stream_read(s, settings->channels[i].name, 8); /* name (8 bytes) */
 		stream_read_uint32(s, settings->channels[i].options); /* options (4 bytes) */
-		settings->channels[i].chan_id = MCS_GLOBAL_CHANNEL_ID + 1 + i;
+		settings->channels[i].channel_id = MCS_GLOBAL_CHANNEL_ID + 1 + i;
 	}
 
-	return True;
+	return true;
 }
 
 /**
@@ -874,13 +913,13 @@ boolean gcc_read_server_network_data(STREAM* s, rdpSettings *settings)
 	for (i = 0; i < channelCount; i++)
 	{
 		stream_read_uint16(s, channelId); /* channelId */
-		settings->channels[i].chan_id = channelId;
+		settings->channels[i].channel_id = channelId;
 	}
 
 	if (channelCount % 2 == 1)
 		stream_seek(s, 2); /* padding */
 
-	return True;
+	return true;
 }
 
 void gcc_write_server_network_data(STREAM* s, rdpSettings *settings)
@@ -894,7 +933,7 @@ void gcc_write_server_network_data(STREAM* s, rdpSettings *settings)
 
 	for (i = 0; i < settings->num_channels; i++)
 	{
-		stream_write_uint16(s, settings->channels[i].chan_id);
+		stream_write_uint16(s, settings->channels[i].channel_id);
 	}
 
 	if (settings->num_channels % 2 == 1)
@@ -913,14 +952,14 @@ boolean gcc_read_client_cluster_data(STREAM* s, rdpSettings *settings, uint16 bl
 	uint32 flags;
 
 	if (blockLength < 8)
-		return False;
+		return false;
 
 	stream_read_uint32(s, flags); /* flags */
 
 	if ((flags | REDIRECTED_SESSIONID_FIELD_VALID))
 		stream_read_uint32(s, settings->redirected_session_id); /* redirectedSessionID */
 
-	return True;
+	return true;
 }
 
 /**
@@ -955,7 +994,7 @@ void gcc_write_client_cluster_data(STREAM* s, rdpSettings *settings)
 boolean gcc_read_client_monitor_data(STREAM* s, rdpSettings *settings, uint16 blockLength)
 {
 	printf("CS_MONITOR\n");
-	return True;
+	return true;
 }
 
 /**

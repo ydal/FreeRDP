@@ -26,7 +26,7 @@ CryptoSha1 crypto_sha1_init(void)
 	return sha1;
 }
 
-void crypto_sha1_update(CryptoSha1 sha1, uint8* data, uint32 length)
+void crypto_sha1_update(CryptoSha1 sha1, const uint8* data, uint32 length)
 {
 	SHA1_Update(&sha1->sha_ctx, data, length);
 }
@@ -44,7 +44,7 @@ CryptoMd5 crypto_md5_init(void)
 	return md5;
 }
 
-void crypto_md5_update(CryptoMd5 md5, uint8* data, uint32 length)
+void crypto_md5_update(CryptoMd5 md5, const uint8* data, uint32 length)
 {
 	MD5_Update(&md5->md5_ctx, data, length);
 }
@@ -55,14 +55,14 @@ void crypto_md5_final(CryptoMd5 md5, uint8* out_data)
 	xfree(md5);
 }
 
-CryptoRc4 crypto_rc4_init(uint8* key, uint32 length)
+CryptoRc4 crypto_rc4_init(const uint8* key, uint32 length)
 {
 	CryptoRc4 rc4 = xmalloc(sizeof(*rc4));
 	RC4_set_key(&rc4->rc4_key, length, key);
 	return rc4;
 }
 
-void crypto_rc4(CryptoRc4 rc4, uint32 length, uint8* in_data, uint8* out_data)
+void crypto_rc4(CryptoRc4 rc4, uint32 length, const uint8* in_data, uint8* out_data)
 {
 	RC4(&rc4->rc4_key, length, in_data, out_data);
 }
@@ -72,11 +72,77 @@ void crypto_rc4_free(CryptoRc4 rc4)
 	xfree(rc4);
 }
 
+CryptoDes3 crypto_des3_encrypt_init(const uint8* key, const uint8* ivec)
+{
+	CryptoDes3 des3 = xmalloc(sizeof(*des3));
+	EVP_CIPHER_CTX_init(&des3->des3_ctx);
+	EVP_EncryptInit_ex(&des3->des3_ctx, EVP_des_ede3_cbc(), NULL, key, ivec);
+	EVP_CIPHER_CTX_set_padding(&des3->des3_ctx, 0);
+	return des3;
+}
+
+CryptoDes3 crypto_des3_decrypt_init(const uint8* key, const uint8* ivec)
+{
+	CryptoDes3 des3 = xmalloc(sizeof(*des3));
+	EVP_CIPHER_CTX_init(&des3->des3_ctx);
+	EVP_DecryptInit_ex(&des3->des3_ctx, EVP_des_ede3_cbc(), NULL, key, ivec);
+	EVP_CIPHER_CTX_set_padding(&des3->des3_ctx, 0);
+	return des3;
+}
+
+void crypto_des3_encrypt(CryptoDes3 des3, uint32 length, const uint8* in_data, uint8* out_data)
+{
+	int len;
+	EVP_EncryptUpdate(&des3->des3_ctx, out_data, &len, in_data, length);
+}
+
+void crypto_des3_decrypt(CryptoDes3 des3, uint32 length, const uint8* in_data, uint8* out_data)
+{
+	int len;
+	EVP_DecryptUpdate(&des3->des3_ctx, out_data, &len, in_data, length);
+	if (length != len)
+		abort();	// TODO
+}
+
+void crypto_des3_free(CryptoDes3 des3)
+{
+	EVP_CIPHER_CTX_cleanup(&des3->des3_ctx);
+	xfree(des3);
+}
+
+CryptoHmac crypto_hmac_new(void)
+{
+	CryptoHmac hmac = xmalloc(sizeof(*hmac));
+	HMAC_CTX_init(&hmac->hmac_ctx);
+	return hmac;
+}
+
+void crypto_hmac_sha1_init(CryptoHmac hmac, const uint8* data, uint32 length)
+{
+	HMAC_Init_ex(&hmac->hmac_ctx, data, length, EVP_sha1(), NULL);
+}
+
+void crypto_hmac_update(CryptoHmac hmac, const uint8* data, uint32 length)
+{
+	HMAC_Update(&hmac->hmac_ctx, data, length);
+}
+
+void crypto_hmac_final(CryptoHmac hmac, uint8* out_data, uint32 length)
+{
+	HMAC_Final(&hmac->hmac_ctx, out_data, &length);
+}
+
+void crypto_hmac_free(CryptoHmac hmac)
+{
+	HMAC_CTX_cleanup(&hmac->hmac_ctx);
+	xfree(hmac);
+}
+
 CryptoCert crypto_cert_read(uint8* data, uint32 length)
 {
 	CryptoCert cert = xmalloc(sizeof(*cert));
 	/* this will move the data pointer but we don't care, we don't use it again */
-	cert->px509 = d2i_X509(NULL, (D2I_X509_CONST unsigned char **) &data, length);
+	cert->px509 = d2i_X509(NULL, (D2I_X509_CONST uint8 **) &data, length);
 	return cert;
 }
 
@@ -88,14 +154,14 @@ void crypto_cert_free(CryptoCert cert)
 
 boolean crypto_cert_verify(CryptoCert server_cert, CryptoCert cacert)
 {
-	return True; /* FIXME: do the actual verification */
+	return true; /* FIXME: do the actual verification */
 }
 
 boolean crypto_cert_get_public_key(CryptoCert cert, rdpBlob* public_key)
 {
 	uint8* p;
 	int length;
-	boolean status = True;
+	boolean status = true;
 	EVP_PKEY* pkey = NULL;
 
 	pkey = X509_get_pubkey(cert->px509);
@@ -103,7 +169,7 @@ boolean crypto_cert_get_public_key(CryptoCert cert, rdpBlob* public_key)
 	if (!pkey)
 	{
 		printf("crypto_cert_get_public_key: X509_get_pubkey() failed\n");
-		status = False;
+		status = false;
 		goto exit;
 	}
 
@@ -112,12 +178,12 @@ boolean crypto_cert_get_public_key(CryptoCert cert, rdpBlob* public_key)
 	if (length < 1)
 	{
 		printf("crypto_cert_get_public_key: i2d_PublicKey() failed\n");
-		status = False;
+		status = false;
 		goto exit;
 	}
 
 	freerdp_blob_alloc(public_key, length);
-	p = (unsigned char*) public_key->data;
+	p = (uint8*) public_key->data;
 	i2d_PublicKey(pkey, &p);
 
 exit:
@@ -127,9 +193,9 @@ exit:
 	return status;
 }
 
-void crypto_rsa_encrypt(uint8* input, int length, uint32 key_length, uint8* modulus, uint8* exponent, uint8* output)
+void crypto_rsa_encrypt(const uint8* input, int length, uint32 key_length, const uint8* modulus, const uint8* exponent, uint8* output)
 {
-	BN_CTX *ctx;
+	BN_CTX* ctx;
 	int output_length;
 	uint8* input_reverse;
 	uint8* modulus_reverse;
@@ -192,32 +258,60 @@ void crypto_nonce(uint8* nonce, int size)
 
 char* crypto_cert_fingerprint(X509* xcert)
 {
-	char* p;
 	int i = 0;
+	char* p;
 	char* fp_buffer;
-	unsigned int fp_len;
-	unsigned char fp[EVP_MAX_MD_SIZE];
+	uint32 fp_len;
+	uint8 fp[EVP_MAX_MD_SIZE];
 
 	X509_digest(xcert, EVP_sha1(), fp, &fp_len);
 
-	fp_buffer = xzalloc(3 * fp_len);
+	fp_buffer = (char*) xzalloc(3 * fp_len);
 	p = fp_buffer;
 
-	for (i = 0; i < fp_len - 1; i++)
+	for (i = 0; i < (int) (fp_len - 1); i++)
 	{
 		sprintf(p, "%02x:", fp[i]);
-		p = (char*) &fp_buffer[i * 3];
+		p = &fp_buffer[i * 3];
 	}
 	sprintf(p, "%02x", fp[i]);
 
 	return fp_buffer;
 }
 
-boolean x509_verify_cert(CryptoCert cert)
+char* crypto_print_name(X509_NAME* name)
+{
+	char* buffer = NULL;
+	BIO* outBIO = BIO_new(BIO_s_mem());
+	
+	if(X509_NAME_print_ex(outBIO, name, 0, XN_FLAG_ONELINE) > 0) 
+	{
+		unsigned long size = BIO_number_written(outBIO);
+		buffer = xzalloc(size + 1);
+		memset(buffer, 0, size + 1);
+		BIO_read(outBIO, buffer, size);
+	}
+
+	BIO_free(outBIO);
+	return buffer;
+}
+
+
+char* crypto_cert_subject(X509* xcert)
+{
+	return crypto_print_name(X509_get_subject_name(xcert));
+}
+
+char* crypto_cert_issuer(X509* xcert)
+{
+	return crypto_print_name(X509_get_issuer_name(xcert));
+}
+
+boolean x509_verify_cert(CryptoCert cert, rdpSettings* settings)
 {
 	char* cert_loc;
 	X509_STORE_CTX* csc;
-	boolean status = False;
+	boolean status = false;
 	X509_STORE* cert_ctx = NULL;
 	X509_LOOKUP* lookup = NULL;
 	X509* xcert = cert->px509;
@@ -239,7 +333,7 @@ boolean x509_verify_cert(CryptoCert cert)
 		goto end;
 
 	X509_LOOKUP_add_dir(lookup, NULL, X509_FILETYPE_DEFAULT);
-	cert_loc = get_local_certloc();
+	cert_loc = get_local_certloc(settings->home_path);
 
 	if(cert_loc != NULL)
 	{
@@ -258,7 +352,7 @@ boolean x509_verify_cert(CryptoCert cert)
 		goto end;
 
 	if (X509_verify_cert(csc) == 1)
-		status = True;
+		status = true;
 
 	X509_STORE_CTX_free(csc);
 	X509_STORE_free(cert_ctx);
@@ -267,10 +361,10 @@ end:
 	return status;
 }
 
-rdpCertdata* crypto_get_certdata(X509* xcert, char* hostname)
+rdpCertData* crypto_get_cert_data(X509* xcert, char* hostname)
 {
 	char* fp;
-	rdpCertdata* certdata;
+	rdpCertData* certdata;
 
 	fp = crypto_cert_fingerprint(xcert);
 	certdata = certdata_new(hostname, fp);
@@ -279,14 +373,14 @@ rdpCertdata* crypto_get_certdata(X509* xcert, char* hostname)
 	return certdata;
 }
 
-void crypto_cert_printinfo(X509* xcert)
+void crypto_cert_print_info(X509* xcert)
 {
 	char* fp;
 	char* issuer;
 	char* subject;
 
-	subject = X509_NAME_oneline(X509_get_subject_name(xcert), NULL, 0);
-	issuer = X509_NAME_oneline(X509_get_issuer_name(xcert), NULL, 0);
+	subject = crypto_cert_subject(xcert);
+	issuer = crypto_cert_issuer(xcert);
 	fp = crypto_cert_fingerprint(xcert);
 
 	printf("Certificate details:\n");
@@ -297,5 +391,8 @@ void crypto_cert_printinfo(X509* xcert)
 			"the CA certificate in your certificate store, or the certificate has expired."
 			"Please look at the documentation on how to create local certificate store for a private CA.\n");
 
+	xfree(subject);
+	xfree(issuer);
 	xfree(fp);
 }
+
