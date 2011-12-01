@@ -17,14 +17,18 @@
  * limitations under the License.
  */
 
+#include <X11/Xlib.h>
+#include <X11/Xutil.h>
+
 #include <freerdp/kbd/kbd.h>
 #include <freerdp/kbd/vkcodes.h>
 
 #include "xf_rail.h"
+#include "xf_cliprdr.h"
 
 #include "xf_event.h"
 
-uint8 X11_EVENT_STRINGS[][20] =
+static const char* const X11_EVENT_STRINGS[] =
 {
 	"", "",
 	"KeyPress",
@@ -71,48 +75,39 @@ void xf_send_mouse_motion_event(rdpInput* input, boolean down, uint32 button, ui
 boolean xf_event_Expose(xfInfo* xfi, XEvent* event, boolean app)
 {
 	int x, y;
-	int cx, cy;
+	int w, h;
 
-	if (app != True)
+	x = event->xexpose.x;
+	y = event->xexpose.y;
+	w = event->xexpose.width;
+	h = event->xexpose.height;
+
+	if (app != true)
 	{
-		x = event->xexpose.x;
-		y = event->xexpose.y;
-		cx = event->xexpose.width;
-		cy = event->xexpose.height;
-		XCopyArea(xfi->display, xfi->primary, xfi->window->handle, xfi->gc, x, y, cx, cy, x, y);
+		XCopyArea(xfi->display, xfi->primary, xfi->window->handle, xfi->gc, x, y, w, h, x, y);
 	}
 	else
 	{
-#if 0
 		xfWindow* xfw;
 		rdpWindow* window;
+		rdpRail* rail = ((rdpContext*) xfi->context)->rail;
 
-		window = window_list_get_by_extra_id(xfi->rail->list, (void*) event->xany.window);
+		window = window_list_get_by_extra_id(rail->list, (void*) event->xexpose.window);
 
 		if (window != NULL)
 		{
 			xfw = (xfWindow*) window->extra;
-
-			XPutImage(xfi->display, xfi->primary, xfw->gc, xfi->image,
-					xfw->left, xfw->top, xfw->left, xfw->top, xfw->width, xfw->height);
-
-			XCopyArea(xfi->display, xfi->primary, xfw->handle, xfw->gc,
-					xfw->left, xfw->top, xfw->width, xfw->height, 0, 0);
-
-			XFlush(xfi->display);
-
-			xfw = (xfWindow*) window->extra;
+			xf_UpdateWindowArea(xfi, xfw, x, y, w, h);
 		}
-#endif
 	}
 
-	return True;
+	return true;
 }
 
 boolean xf_event_VisibilityNotify(xfInfo* xfi, XEvent* event, boolean app)
 {
 	xfi->unobscured = event->xvisibility.state == VisibilityUnobscured;
-	return True;
+	return true;
 }
 
 boolean xf_event_MotionNotify(xfInfo* xfi, XEvent* event, boolean app)
@@ -121,12 +116,12 @@ boolean xf_event_MotionNotify(xfInfo* xfi, XEvent* event, boolean app)
 
 	input = xfi->instance->input;
 
-	if (app != True)
+	if (app != true)
 	{
-		if (xfi->mouse_motion != True)
+		if (xfi->mouse_motion != true)
 		{
 			if ((event->xmotion.state & (Button1Mask | Button2Mask | Button3Mask)) == 0)
-				return True;
+				return true;
 		}
 
 		input->MouseEvent(input, PTR_FLAGS_MOVE, event->xmotion.x, event->xmotion.y);
@@ -134,26 +129,24 @@ boolean xf_event_MotionNotify(xfInfo* xfi, XEvent* event, boolean app)
 		if (xfi->fullscreen)
 			XSetInputFocus(xfi->display, xfi->window->handle, RevertToPointerRoot, CurrentTime);
 	}
-	else if (xfi->mouse_motion == True)
+	else if (xfi->mouse_motion == true)
 	{
-		xfWindow* xfw;
 		rdpWindow* window;
 		int x = event->xmotion.x;
 		int y = event->xmotion.y;
-		window = window_list_get_by_extra_id(xfi->rail->list, (void*)event->xmotion.window);
+		rdpRail* rail = ((rdpContext*) xfi->context)->rail;
+
+		window = window_list_get_by_extra_id(rail->list, (void*) event->xmotion.window);
 
 		if (window != NULL)
 		{
-			xfw = (xfWindow*) window->extra;
-			x += xfw->left;
-			y += xfw->top;
-
-			if (!xfw->isLocalMoveSizeModeEnabled)
-				input->MouseEvent(input, PTR_FLAGS_MOVE, x, y);
+			x += window->windowOffsetX;
+			y += window->windowOffsetY;
+			input->MouseEvent(input, PTR_FLAGS_MOVE, x, y);
 		}
 	}
 
-	return True;
+	return true;
 }
 
 boolean xf_event_ButtonPress(xfInfo* xfi, XEvent* event, boolean app)
@@ -168,35 +161,35 @@ boolean xf_event_ButtonPress(xfInfo* xfi, XEvent* event, boolean app)
 	x = 0;
 	y = 0;
 	flags = 0;
-	wheel = False;
+	wheel = false;
 
 	switch (event->xbutton.button)
 	{
 		case 1:
-			x = event->xmotion.x;
-			y = event->xmotion.y;
+			x = event->xbutton.x;
+			y = event->xbutton.y;
 			flags = PTR_FLAGS_DOWN | PTR_FLAGS_BUTTON1;
 			break;
 
 		case 2:
-			x = event->xmotion.x;
-			y = event->xmotion.y;
+			x = event->xbutton.x;
+			y = event->xbutton.y;
 			flags = PTR_FLAGS_DOWN | PTR_FLAGS_BUTTON3;
 			break;
 
 		case 3:
-			x = event->xmotion.x;
-			y = event->xmotion.y;
+			x = event->xbutton.x;
+			y = event->xbutton.y;
 			flags = PTR_FLAGS_DOWN | PTR_FLAGS_BUTTON2;
 			break;
 
 		case 4:
-			wheel = True;
+			wheel = true;
 			flags = PTR_FLAGS_WHEEL | 0x0078;
 			break;
 
 		case 5:
-			wheel = True;
+			wheel = true;
 			flags = PTR_FLAGS_WHEEL | PTR_FLAGS_WHEEL_NEGATIVE | 0x0088;
 			break;
 
@@ -217,15 +210,15 @@ boolean xf_event_ButtonPress(xfInfo* xfi, XEvent* event, boolean app)
 		{
 			if (app)
 			{
-				xfWindow* xfw;
 				rdpWindow* window;
-				window = window_list_get_by_extra_id(xfi->rail->list, (void*) event->xbutton.window);
+				rdpRail* rail = ((rdpContext*) xfi->context)->rail;
+
+				window = window_list_get_by_extra_id(rail->list, (void*) event->xbutton.window);
 
 				if (window != NULL)
 				{
-					xfw = (xfWindow*) window->extra;
-					x += xfw->left;
-					y += xfw->top;
+					x += window->windowOffsetX;
+					y += window->windowOffsetY;
 				}
 			}
 
@@ -233,7 +226,7 @@ boolean xf_event_ButtonPress(xfInfo* xfi, XEvent* event, boolean app)
 		}
 	}
 
-	return True;
+	return true;
 }
 
 boolean xf_event_ButtonRelease(xfInfo* xfi, XEvent* event, boolean app)
@@ -251,20 +244,20 @@ boolean xf_event_ButtonRelease(xfInfo* xfi, XEvent* event, boolean app)
 	switch (event->xbutton.button)
 	{
 		case 1:
-			x = event->xmotion.x;
-			y = event->xmotion.y;
+			x = event->xbutton.x;
+			y = event->xbutton.y;
 			flags = PTR_FLAGS_BUTTON1;
 			break;
 
 		case 2:
-			x = event->xmotion.x;
-			y = event->xmotion.y;
+			x = event->xbutton.x;
+			y = event->xbutton.y;
 			flags = PTR_FLAGS_BUTTON3;
 			break;
 
 		case 3:
-			x = event->xmotion.x;
-			y = event->xmotion.y;
+			x = event->xbutton.x;
+			y = event->xbutton.y;
 			flags = PTR_FLAGS_BUTTON2;
 			break;
 
@@ -277,22 +270,22 @@ boolean xf_event_ButtonRelease(xfInfo* xfi, XEvent* event, boolean app)
 	{
 		if (app)
 		{
-			xfWindow* xfw;
 			rdpWindow* window;
-			window = window_list_get_by_extra_id(xfi->rail->list, (void*) event->xany.window);
+			rdpRail* rail = ((rdpContext*) xfi->context)->rail;
+
+			window = window_list_get_by_extra_id(rail->list, (void*) event->xbutton.window);
 
 			if (window != NULL)
 			{
-				xfw = (xfWindow*) window->extra;
-				x += xfw->left;
-				y += xfw->top;
+				x += window->windowOffsetX;
+				y += window->windowOffsetY;
 			}
 		}
 
 		input->MouseEvent(input, flags, x, y);
 	}
 
-	return True;
+	return true;
 }
 
 boolean xf_event_KeyPress(xfInfo* xfi, XEvent* event, boolean app)
@@ -305,11 +298,11 @@ boolean xf_event_KeyPress(xfInfo* xfi, XEvent* event, boolean app)
 	xf_kbd_set_keypress(xfi, event->xkey.keycode, keysym);
 
 	if (xfi->fullscreen_toggle && xf_kbd_handle_special_keys(xfi, keysym))
-		return True;
+		return true;
 
-	xf_kbd_send_key(xfi, True, event->xkey.keycode);
+	xf_kbd_send_key(xfi, true, event->xkey.keycode);
 
-	return True;
+	return true;
 }
 
 boolean xf_event_KeyRelease(xfInfo* xfi, XEvent* event, boolean app)
@@ -324,45 +317,48 @@ boolean xf_event_KeyRelease(xfInfo* xfi, XEvent* event, boolean app)
 		if (next_event.type == KeyPress)
 		{
 			if (next_event.xkey.keycode == event->xkey.keycode)
-				return True;
+				return true;
 		}
 	}
 
 	xf_kbd_unset_keypress(xfi, event->xkey.keycode);
-	xf_kbd_send_key(xfi, False, event->xkey.keycode);
+	xf_kbd_send_key(xfi, false, event->xkey.keycode);
 
-	return True;
+	return true;
 }
 
 boolean xf_event_FocusIn(xfInfo* xfi, XEvent* event, boolean app)
 {
 	if (event->xfocus.mode == NotifyGrab)
-		return True;
+		return true;
 
-	xfi->focused = True;
+	xfi->focused = true;
 
-	if (xfi->mouse_active && (app != True))
-		XGrabKeyboard(xfi->display, xfi->window->handle, True, GrabModeAsync, GrabModeAsync, CurrentTime);
+	if (xfi->mouse_active && (app != true))
+		XGrabKeyboard(xfi->display, xfi->window->handle, true, GrabModeAsync, GrabModeAsync, CurrentTime);
 
-	//xf_rail_send_activate(xfi, event->xany.window, True);
+	xf_rail_send_activate(xfi, event->xany.window, true);
 	xf_kbd_focus_in(xfi);
 
-	return True;
+	if (xfi->remote_app != true)
+		xf_cliprdr_check_owner(xfi);
+
+	return true;
 }
 
 boolean xf_event_FocusOut(xfInfo* xfi, XEvent* event, boolean app)
 {
 	if (event->xfocus.mode == NotifyUngrab)
-		return True;
+		return true;
 
-	xfi->focused = False;
+	xfi->focused = false;
 
 	if (event->xfocus.mode == NotifyWhileGrabbed)
 		XUngrabKeyboard(xfi->display, CurrentTime);
 
-	//xf_rail_send_activate(xfi, event->xany.window, False);
+	xf_rail_send_activate(xfi, event->xany.window, false);
 
-	return True;
+	return true;
 }
 
 boolean xf_event_MappingNotify(xfInfo* xfi, XEvent* event, boolean app)
@@ -373,112 +369,119 @@ boolean xf_event_MappingNotify(xfInfo* xfi, XEvent* event, boolean app)
 		xfi->modifier_map = XGetModifierMapping(xfi->display);
 	}
 
-	return True;
+	return true;
 }
 
 boolean xf_event_ClientMessage(xfInfo* xfi, XEvent* event, boolean app)
 {
-	Atom kill_atom;
-	Atom protocol_atom;
-
-	protocol_atom = XInternAtom(xfi->display, "WM_PROTOCOLS", True);
-	kill_atom = XInternAtom(xfi->display, "WM_DELETE_WINDOW", True);
-
-	if ((event->xclient.message_type == protocol_atom)
-	    && ((Atom) event->xclient.data.l[0] == kill_atom))
+	if ((event->xclient.message_type == xfi->WM_PROTOCOLS)
+	    && ((Atom) event->xclient.data.l[0] == xfi->WM_DELETE_WINDOW))
 	{
-		return False;
+		if (app)
+		{
+			rdpWindow* window;
+			rdpRail* rail = ((rdpContext*) xfi->context)->rail;
+
+			window = window_list_get_by_extra_id(rail->list, (void*) event->xclient.window);
+
+			if (window != NULL)
+			{
+				xf_rail_send_client_system_command(xfi, window->windowId, SC_CLOSE);
+			}
+
+			return true;
+		}
+		else
+		{
+			return false;
+		}
 	}
 
-	return True;
+	return true;
 }
 
 boolean xf_event_EnterNotify(xfInfo* xfi, XEvent* event, boolean app)
 {
-	if (app != True)
+	if (app != true)
 	{
-		xfi->mouse_active = True;
+		xfi->mouse_active = true;
 
 		if (xfi->fullscreen)
 			XSetInputFocus(xfi->display, xfi->window->handle, RevertToPointerRoot, CurrentTime);
 
 		if (xfi->focused)
-			XGrabKeyboard(xfi->display, xfi->window->handle, True, GrabModeAsync, GrabModeAsync, CurrentTime);
+			XGrabKeyboard(xfi->display, xfi->window->handle, true, GrabModeAsync, GrabModeAsync, CurrentTime);
+	} else {
+		// Keep track of which window has focus so that we can apply pointer updates
+		xfWindow* xfw;
+		rdpWindow* window;
+		rdpRail* rail = ((rdpContext*) xfi->context)->rail;
+		window = window_list_get_by_extra_id(rail->list, (void*) event->xexpose.window);
+		if (window != NULL)
+		{
+			xfw = (xfWindow*) window->extra;
+			xfi->window = xfw;
+		}
 	}
 
-	return True;
+	return true;
 }
 
 boolean xf_event_LeaveNotify(xfInfo* xfi, XEvent* event, boolean app)
 {
-	if (app != True)
+	if (app != true)
 	{
-		xfi->mouse_active = False;
+		xfi->mouse_active = false;
 		XUngrabKeyboard(xfi->display, CurrentTime);
 	}
 
-	return True;
+	return true;
 }
 
 boolean xf_event_ConfigureNotify(xfInfo* xfi, XEvent* event, boolean app)
 {
 	rdpWindow* window;
+	rdpRail* rail = ((rdpContext*) xfi->context)->rail;
 
-	window = window_list_get_by_extra_id(xfi->rail->list, (void*) event->xconfigure.window);
+	window = window_list_get_by_extra_id(rail->list, (void*) event->xconfigure.window);
 
 	if (window != NULL)
 	{
 		xfWindow* xfw;
+		uint32 left, top;
+		uint32 right, bottom;
+		uint32 width, height;
 		xfw = (xfWindow*) window->extra;
+
+		left = event->xconfigure.x;
+		top = event->xconfigure.y;
+		width = event->xconfigure.width;
+		height = event->xconfigure.height;
+		right = left + width - 1;
+		bottom = top + height - 1;
 
 		DEBUG_X11_LMS("ConfigureNotify: send_event=%d eventWindow=0x%X window=0x%X above=0x%X rc={l=%d t=%d r=%d b=%d} "
 			"w=%d h=%d override_redirect=%d",
 			event->xconfigure.send_event,
-			(uint32)event->xconfigure.event,
-			(uint32)event->xconfigure.window,
-			(uint32)event->xconfigure.above,
-			event->xconfigure.x,
-			event->xconfigure.y,
-			event->xconfigure.x + event->xconfigure.width - 1,
-			event->xconfigure.y + event->xconfigure.height - 1,
-			event->xconfigure.width,
-			event->xconfigure.height,
+			(uint32) event->xconfigure.event,
+			(uint32) event->xconfigure.window,
+			(uint32) event->xconfigure.above,
+			left, top, right, bottom, width, height,
 			event->xconfigure.override_redirect);
-
-		if (xfw->isLocalMoveSizeModeEnabled && event->xconfigure.above != 0)
-		{
-			uint32 left = event->xconfigure.x;
-			uint32 top = event->xconfigure.y;
-			uint32 right = event->xconfigure.x + event->xconfigure.width;
-			uint32 bottom = event->xconfigure.y + event->xconfigure.height;
-
-			DEBUG_X11_LMS("MoveSendToServer: windowId=0x%X rc={l=%d t=%d r=%d b=%d} w=%d h=%d \n",
-				(uint32)xfw->handle, left, top, right, bottom, event->xconfigure.width,
-				event->xconfigure.height);
-
-			xf_rail_send_windowmove(xfi, window->windowId, left, top, right, bottom);
-		}
-
-		XPutImage(xfi->display, xfi->primary, xfw->gc, xfi->image,
-				xfw->left, xfw->top, xfw->left, xfw->top, xfw->width, xfw->height);
-
-		XCopyArea(xfi->display, xfi->primary, xfw->handle, xfw->gc,
-				xfw->left, xfw->top, xfw->width, xfw->height, 0, 0);
-
-		XFlush(xfi->display);
 	}
 
-	return True;
+	return true;
 }
 
 boolean xf_event_MapNotify(xfInfo* xfi, XEvent* event, boolean app)
 {
 	rdpWindow* window;
+	rdpRail* rail = ((rdpContext*) xfi->context)->rail;
 
-	if (app != True)
-		return True;
+	if (app != true)
+		return true;
 
-	window = window_list_get_by_extra_id(xfi->rail->list, (void*) event->xany.window);
+	window = window_list_get_by_extra_id(rail->list, (void*) event->xany.window);
 
 	if (window != NULL)
 	{
@@ -486,23 +489,67 @@ boolean xf_event_MapNotify(xfInfo* xfi, XEvent* event, boolean app)
 		xf_rail_send_client_system_command(xfi, window->windowId, SC_RESTORE);
 	}
 
-	return True;
+	return true;
+}
+
+boolean xf_event_SelectionNotify(xfInfo* xfi, XEvent* event, boolean app)
+{
+	if (xfi->remote_app != true)
+	{
+		if (xf_cliprdr_process_selection_notify(xfi, event))
+			return true;
+	}
+
+	return true;
+}
+
+boolean xf_event_SelectionRequest(xfInfo* xfi, XEvent* event, boolean app)
+{
+	if (xfi->remote_app != true)
+	{
+		if (xf_cliprdr_process_selection_request(xfi, event))
+			return true;
+	}
+
+	return true;
+}
+
+boolean xf_event_SelectionClear(xfInfo* xfi, XEvent* event, boolean app)
+{
+	if (xfi->remote_app != true)
+	{
+		if (xf_cliprdr_process_selection_clear(xfi, event))
+			return true;
+	}
+
+	return true;
+}
+
+boolean xf_event_PropertyNotify(xfInfo* xfi, XEvent* event, boolean app)
+{
+	if (xfi->remote_app != true)
+	{
+		if (xf_cliprdr_process_property_notify(xfi, event))
+			return true;
+	}
+
+	return true;
 }
 
 boolean xf_event_process(freerdp* instance, XEvent* event)
 {
-	boolean app = False;
-	boolean status = True;
-	xfInfo* xfi = GET_XFI(instance);
+	boolean app = false;
+	boolean status = true;
+	xfInfo* xfi = ((xfContext*) instance->context)->xfi;
 
-	if (xfi->remote_app == True)
+	if (xfi->remote_app == true)
 	{
-		app = True;
+		app = true;
 	}
 	else
 	{
 		if (event->xany.window != xfi->window->handle)
-			app = True;
+			app = true;
 	}
 
 
@@ -578,6 +625,22 @@ boolean xf_event_process(freerdp* instance, XEvent* event)
 
 		case ClientMessage:
 			status = xf_event_ClientMessage(xfi, event, app);
+			break;
+
+		case SelectionNotify:
+			status = xf_event_SelectionNotify(xfi, event, app);
+			break;
+
+		case SelectionRequest:
+			status = xf_event_SelectionRequest(xfi, event, app);
+			break;
+
+		case SelectionClear:
+			status = xf_event_SelectionClear(xfi, event, app);
+			break;
+
+		case PropertyNotify:
+			status = xf_event_PropertyNotify(xfi, event, app);
 			break;
 
 		default:

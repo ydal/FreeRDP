@@ -43,16 +43,27 @@ boolean xf_detect_monitors(xfInfo* xfi, rdpSettings* settings)
 
 	vscreen = &xfi->vscreen;
 
-	xf_GetWorkArea(xfi);
+	if (xf_GetWorkArea(xfi) != true)
+	{
+		xfi->workArea.x = 0;
+		xfi->workArea.y = 0;
+		xfi->workArea.width = WidthOfScreen(xfi->screen);
+		xfi->workArea.height = HeightOfScreen(xfi->screen);
+	}
 
 	if (settings->workarea)
 	{
 		settings->width = xfi->workArea.width;
 		settings->height = xfi->workArea.height;
 	}
+	else if (settings->percent_screen)
+	{
+		settings->width = (xfi->workArea.width * settings->percent_screen) / 100;
+		settings->height = (xfi->workArea.height * settings->percent_screen) / 100;
+	}
 
-	if (settings->fullscreen != True && settings->workarea != True)
-		return True;
+	if (settings->fullscreen != true && settings->workarea != true)
+		return true;
 
 #ifdef WITH_XINERAMA
 	if (XineramaQueryExtension(xfi->display, &ignored, &ignored2))
@@ -76,7 +87,7 @@ boolean xf_detect_monitors(xfInfo* xfi, rdpSettings* settings)
 					vscreen->monitors[i].area.bottom = screen_info[i].y_org + screen_info[i].height - 1;
 
 					if ((screen_info[i].x_org == 0) && (screen_info[i].y_org == 0))
-						vscreen->monitors[i].primary = True;
+						vscreen->monitors[i].primary = true;
 				}
 			}
 
@@ -104,5 +115,5 @@ boolean xf_detect_monitors(xfInfo* xfi, rdpSettings* settings)
 	settings->width = vscreen->area.right - vscreen->area.left + 1;
 	settings->height = vscreen->area.bottom - vscreen->area.top + 1;
 
-	return True;
+	return true;
 }

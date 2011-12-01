@@ -76,11 +76,6 @@
 #define CBR2_24BPP			0x5
 #define CBR2_32BPP			0x6
 
-#define CBR2_HEIGHT_SAME_AS_WIDTH	0x01
-#define CBR2_PERSISTENT_KEY_PRESENT	0x02
-#define CBR2_NO_BITMAP_COMPRESSION_HDR	0x08
-#define CBR2_DO_NOT_CACHE		0x10
-
 #define CBR23_8BPP			0x3
 #define CBR23_16BPP			0x4
 #define CBR23_24BPP			0x5
@@ -88,14 +83,6 @@
 
 #define CBR3_IGNORABLE_FLAG		0x08
 #define CBR3_DO_NOT_CACHE		0x10
-
-#define SO_FLAG_DEFAULT_PLACEMENT	0x01
-#define SO_HORIZONTAL			0x02
-#define SO_VERTICAL			0x04
-#define SO_REVERSED			0x08
-#define SO_ZERO_BEARINGS		0x10
-#define SO_CHAR_INC_EQUAL_BM_BASE	0x20
-#define SO_MAXEXT_EQUAL_BM_SIDE		0x40
 
 #define COMPRESSED_BRUSH_LENGTH		20
 
@@ -244,7 +231,5 @@ void update_read_draw_gdiplus_end_order(STREAM* s, DRAW_GDIPLUS_END_ORDER* draw_
 void update_read_draw_gdiplus_cache_first_order(STREAM* s, DRAW_GDIPLUS_CACHE_FIRST_ORDER* draw_gdiplus_cache_first);
 void update_read_draw_gdiplus_cache_next_order(STREAM* s, DRAW_GDIPLUS_CACHE_NEXT_ORDER* draw_gdiplus_cache_next);
 void update_read_draw_gdiplus_cache_end_order(STREAM* s, DRAW_GDIPLUS_CACHE_END_ORDER* draw_gdiplus_cache_end);
-
-//#define WITH_DEBUG_ORDERS	1
 
 #endif /* __ORDERS_H */

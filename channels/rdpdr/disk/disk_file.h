@@ -31,7 +31,9 @@ struct _DISK_FILE
 	uint32 id;
 	boolean is_dir;
 	int fd;
+	int err;
 	DIR* dir;
+	char* basepath;
 	char* fullpath;
 	char* filename;
 	boolean delete_pending;

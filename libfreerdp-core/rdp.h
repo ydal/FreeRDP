@@ -20,8 +20,6 @@
 #ifndef __RDP_H
 #define __RDP_H
 
-typedef struct rdp_rdp rdpRdp;
-
 #include "mcs.h"
 #include "tpkt.h"
 #include "fastpath.h"
@@ -31,12 +29,13 @@ typedef struct rdp_rdp rdpRdp;
 #include "update.h"
 #include "license.h"
 #include "errinfo.h"
+#include "extension.h"
 #include "security.h"
 #include "transport.h"
 #include "connection.h"
 #include "redirection.h"
 #include "capabilities.h"
-#include "vchan.h"
+#include "channel.h"
 #include "mppc.h"
 
 #include <freerdp/freerdp.h>
@@ -117,6 +116,7 @@ typedef struct rdp_rdp rdpRdp;
 struct rdp_rdp
 {
 	int state;
+	freerdp* instance;
 	struct rdp_mcs* mcs;
 	struct rdp_nego* nego;
 	struct rdp_input* input;
@@ -126,8 +126,27 @@ struct rdp_rdp
 	struct rdp_redirection* redirection;
 	struct rdp_settings* settings;
 	struct rdp_transport* transport;
-	struct rdp_vchan* vchan;
-    struct rdp_mppc* mppc;
+	struct rdp_extension* extension;
+	struct rdp_mppc* mppc;
+	struct crypto_rc4_struct* rc4_decrypt_key;
+	int decrypt_use_count;
+	struct crypto_rc4_struct* rc4_encrypt_key;
+	int encrypt_use_count;
+	struct crypto_des3_struct* fips_encrypt;
+	struct crypto_des3_struct* fips_decrypt;
+	struct crypto_hmac_struct* fips_hmac;
+	uint32 sec_flags;
+	boolean do_crypt;
+	uint8 sign_key[16];
+	uint8 decrypt_key[16];
+	uint8 encrypt_key[16];
+	uint8 decrypt_update_key[16];
+	uint8 encrypt_update_key[16];
+	int rc4_key_len;
+	uint8 fips_sign_key[20];
+	uint8 fips_encrypt_key[24];
+	uint8 fips_decrypt_key[24];
+	uint32 errorInfo;
 };
 
 void rdp_read_security_header(STREAM* s, uint16* flags);
@@ -136,7 +155,9 @@ void rdp_write_security_header(STREAM* s, uint16 flags);
 boolean rdp_read_share_control_header(STREAM* s, uint16* length, uint16* type, uint16* channel_id);
 void rdp_write_share_control_header(STREAM* s, uint16 length, uint16 type, uint16 channel_id);
 
-boolean rdp_read_share_data_header(STREAM* s, uint16* length, uint8* type, uint32* share_id);
+boolean rdp_read_share_data_header(STREAM* s, uint16* length, uint8* type, uint32* share_id, 
+			uint8 *compressed_type, uint16 *compressed_len);
+
 void rdp_write_share_data_header(STREAM* s, uint16 length, uint8 type, uint32 share_id);
 
 STREAM* rdp_send_stream_init(rdpRdp* rdp);
@@ -168,5 +189,7 @@ void rdp_free(rdpRdp* rdp);
 #else
 #define DEBUG_RDP(fmt, ...) DEBUG_NULL(fmt, ## __VA_ARGS__)
 #endif
+
+boolean rdp_decrypt(rdpRdp* rdp, STREAM* s, int length);
 
 #endif /* __RDP_H */

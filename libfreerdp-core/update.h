@@ -37,6 +37,7 @@
 
 rdpUpdate* update_new(rdpRdp* rdp);
 void update_free(rdpUpdate* update);
+void update_free_bitmap(BITMAP_UPDATE* bitmap_update);
 void update_reset_state(rdpUpdate* update);
 
 void update_read_bitmap(rdpUpdate* update, STREAM* s, BITMAP_UPDATE* bitmap_update);
@@ -44,6 +45,12 @@ void update_read_palette(rdpUpdate* update, STREAM* s, PALETTE_UPDATE* palette_u
 void update_recv_play_sound(rdpUpdate* update, STREAM* s);
 void update_recv_pointer(rdpUpdate* update, STREAM* s);
 void update_recv(rdpUpdate* update, STREAM* s);
+
+void update_read_pointer_position(STREAM* s, POINTER_POSITION_UPDATE* pointer_position);
+void update_read_pointer_system(STREAM* s, POINTER_SYSTEM_UPDATE* pointer_system);
+void update_read_pointer_color(STREAM* s, POINTER_COLOR_UPDATE* pointer_color);
+void update_read_pointer_new(STREAM* s, POINTER_NEW_UPDATE* pointer_new);
+void update_read_pointer_cached(STREAM* s, POINTER_CACHED_UPDATE* pointer_cached);
 
 void update_register_server_callbacks(rdpUpdate* update);
 

@@ -72,10 +72,23 @@
  * @param credssp
  */
 
-void credssp_ntlmssp_init(rdpCredssp* credssp)
+int credssp_ntlmssp_init(rdpCredssp* credssp)
 {
-	NTLMSSP *ntlmssp = credssp->ntlmssp;
-	rdpSettings *settings = credssp->transport->settings;
+	freerdp* instance;
+	NTLMSSP* ntlmssp = credssp->ntlmssp;
+	rdpSettings* settings = credssp->transport->settings;
+	instance = (freerdp*) settings->instance;
+
+	if ((settings->password == NULL) || (settings->username == NULL))
+	{
+		if(instance->Authenticate)
+		{
+			boolean proceed = instance->Authenticate(instance,
+					&settings->username, &settings->password, &settings->domain);
+			if (!proceed)
+				return 0;
+		}
+	}
 
 	ntlmssp_set_password(ntlmssp, settings->password);
 	ntlmssp_set_username(ntlmssp, settings->username);
@@ -83,9 +96,7 @@ void credssp_ntlmssp_init(rdpCredssp* credssp)
 	if (settings->domain != NULL)
 	{
 		if (strlen(settings->domain) > 0)
-		{
 			ntlmssp_set_domain(ntlmssp, settings->domain);
-		}
 	}
 	else
 	{
@@ -96,7 +107,10 @@ void credssp_ntlmssp_init(rdpCredssp* credssp)
 	ntlmssp_generate_random_session_key(ntlmssp);
 	ntlmssp_generate_exported_session_key(ntlmssp);
 	
-	ntlmssp->ntlm_v2 = 0;
+	if (settings->ntlm_version == 2)
+		ntlmssp->ntlm_v2 = 1;
+
+	return 1;
 }
 
 /**
@@ -106,7 +120,7 @@ void credssp_ntlmssp_init(rdpCredssp* credssp)
 
 int credssp_get_public_key(rdpCredssp* credssp)
 {
-	int ret;
+	int status;
 	CryptoCert cert;
 	
 	cert = tls_get_certificate(credssp->transport->tls);
@@ -116,12 +130,14 @@ int credssp_get_public_key(rdpCredssp* credssp)
 		printf("credssp_get_public_key: tls_get_certificate failed to return the server certificate.\n");
 		return 0;
 	}
-	if(tls_verify_certificate(cert,credssp->transport->settings->hostname))
+
+	if(tls_verify_certificate(cert, credssp->transport->settings, credssp->transport->settings->hostname))
 		tls_disconnect(credssp->transport->tls);
-	ret = crypto_cert_get_public_key(cert, &credssp->public_key);
+
+	status = crypto_cert_get_public_key(cert, &credssp->public_key);
 	crypto_cert_free(cert);
 
-	return ret;
+	return status;
 }
 
 /**
@@ -132,11 +148,12 @@ int credssp_get_public_key(rdpCredssp* credssp)
 
 int credssp_authenticate(rdpCredssp* credssp)
 {
-	NTLMSSP *ntlmssp = credssp->ntlmssp;
+	NTLMSSP* ntlmssp = credssp->ntlmssp;
 	STREAM* s = stream_new(0);
 	uint8* negoTokenBuffer = (uint8*) xmalloc(2048);
 
-	credssp_ntlmssp_init(credssp);
+	if (credssp_ntlmssp_init(credssp) == 0)
+		return 0;
 
 	if (credssp_get_public_key(credssp) == 0)
 		return 0;
@@ -198,7 +215,7 @@ int credssp_authenticate(rdpCredssp* credssp)
 
 void credssp_encrypt_public_key(rdpCredssp* credssp, rdpBlob* d)
 {
-	uint8 *p;
+	uint8* p;
 	uint8 signature[16];
 	rdpBlob encrypted_public_key;
 	NTLMSSP *ntlmssp = credssp->ntlmssp;
@@ -237,7 +254,7 @@ void credssp_encrypt_public_key(rdpCredssp* credssp, rdpBlob* d)
 int credssp_verify_public_key(rdpCredssp* credssp, rdpBlob* d)
 {
 	uint8 *p1, *p2;
-	uint8 *signature;
+	uint8* signature;
 	rdpBlob public_key;
 	rdpBlob encrypted_public_key;
 
@@ -271,10 +288,10 @@ int credssp_verify_public_key(rdpCredssp* credssp, rdpBlob* d)
 
 void credssp_encrypt_ts_credentials(rdpCredssp* credssp, rdpBlob* d)
 {
-	uint8 *p;
+	uint8* p;
 	uint8 signature[16];
 	rdpBlob encrypted_ts_credentials;
-	NTLMSSP *ntlmssp = credssp->ntlmssp;
+	NTLMSSP* ntlmssp = credssp->ntlmssp;
 
 	freerdp_blob_alloc(d, credssp->ts_credentials.length + 16);
 	ntlmssp_encrypt_message(ntlmssp, &credssp->ts_credentials, &encrypted_ts_credentials, signature);
@@ -333,15 +350,15 @@ void credssp_write_ts_password_creds(rdpCredssp* credssp, STREAM* s)
 	ber_write_sequence_tag(s, length);
 
 	/* [0] domainName (OCTET STRING) */
-	ber_write_contextual_tag(s, 0, credssp->ntlmssp->domain.length + 2, True);
+	ber_write_contextual_tag(s, 0, credssp->ntlmssp->domain.length + 2, true);
 	ber_write_octet_string(s, credssp->ntlmssp->domain.data, credssp->ntlmssp->domain.length);
 
 	/* [1] userName (OCTET STRING) */
-	ber_write_contextual_tag(s, 1, credssp->ntlmssp->username.length + 2, True);
+	ber_write_contextual_tag(s, 1, credssp->ntlmssp->username.length + 2, true);
 	ber_write_octet_string(s, credssp->ntlmssp->username.data, credssp->ntlmssp->username.length);
 
 	/* [2] password (OCTET STRING) */
-	ber_write_contextual_tag(s, 2, credssp->ntlmssp->password.length + 2, True);
+	ber_write_contextual_tag(s, 2, credssp->ntlmssp->password.length + 2, true);
 	ber_write_octet_string(s, credssp->ntlmssp->password.data, credssp->ntlmssp->password.length);
 }
 
@@ -378,12 +395,12 @@ void credssp_write_ts_credentials(rdpCredssp* credssp, STREAM* s)
 	length -= ber_write_sequence_tag(s, length);
 
 	/* [0] credType (INTEGER) */
-	length -= ber_write_contextual_tag(s, 0, 3, True);
+	length -= ber_write_contextual_tag(s, 0, 3, true);
 	length -= ber_write_integer(s, 1);
 
 	/* [1] credentials (OCTET STRING) */
 	length -= 1;
-	length -= ber_write_contextual_tag(s, 1, length, True);
+	length -= ber_write_contextual_tag(s, 1, length, true);
 	length -= ber_write_octet_string_tag(s, ts_password_creds_length);
 
 	credssp_write_ts_password_creds(credssp, s);
@@ -475,17 +492,17 @@ void credssp_send(rdpCredssp* credssp, rdpBlob* negoToken, rdpBlob* authInfo, rd
 	/* TSRequest */
 	length = ber_get_content_length(ts_request_length);
 	ber_write_sequence_tag(s, length); /* SEQUENCE */
-	ber_write_contextual_tag(s, 0, 3, True); /* [0] version */
+	ber_write_contextual_tag(s, 0, 3, true); /* [0] version */
 	ber_write_integer(s, 2); /* INTEGER */
 
 	/* [1] negoTokens (NegoData) */
 	if (nego_tokens_length > 0)
 	{
 		length = ber_get_content_length(nego_tokens_length);
-		length -= ber_write_contextual_tag(s, 1, length, True); /* NegoData */
+		length -= ber_write_contextual_tag(s, 1, length, true); /* NegoData */
 		length -= ber_write_sequence_tag(s, length); /* SEQUENCE OF NegoDataItem */
 		length -= ber_write_sequence_tag(s, length); /* NegoDataItem */
-		length -= ber_write_contextual_tag(s, 0, length, True); /* [0] negoToken */
+		length -= ber_write_contextual_tag(s, 0, length, true); /* [0] negoToken */
 		ber_write_octet_string(s, negoToken->data, length); /* OCTET STRING */
 	}
 
@@ -493,7 +510,7 @@ void credssp_send(rdpCredssp* credssp, rdpBlob* negoToken, rdpBlob* authInfo, rd
 	if (auth_info_length > 0)
 	{
 		length = ber_get_content_length(auth_info_length);
-		length -= ber_write_contextual_tag(s, 2, length, True);
+		length -= ber_write_contextual_tag(s, 2, length, true);
 		ber_write_octet_string(s, authInfo->data, authInfo->length);
 	}
 
@@ -501,7 +518,7 @@ void credssp_send(rdpCredssp* credssp, rdpBlob* negoToken, rdpBlob* authInfo, rd
 	if (pub_key_auth_length > 0)
 	{
 		length = ber_get_content_length(pub_key_auth_length);
-		length -= ber_write_contextual_tag(s, 3, length, True);
+		length -= ber_write_contextual_tag(s, 3, length, true);
 		ber_write_octet_string(s, pubKeyAuth->data, length);
 	}
 
@@ -532,22 +549,22 @@ int credssp_recv(rdpCredssp* credssp, rdpBlob* negoToken, rdpBlob* authInfo, rdp
 
 	/* TSRequest */
 	ber_read_sequence_tag(s, &length);
-	ber_read_contextual_tag(s, 0, &length, True);
+	ber_read_contextual_tag(s, 0, &length, true);
 	ber_read_integer(s, &version);
 
 	/* [1] negoTokens (NegoData) */
-	if (ber_read_contextual_tag(s, 1, &length, True) != False)
+	if (ber_read_contextual_tag(s, 1, &length, true) != false)
 	{
 		ber_read_sequence_tag(s, &length); /* SEQUENCE OF NegoDataItem */
 		ber_read_sequence_tag(s, &length); /* NegoDataItem */
-		ber_read_contextual_tag(s, 0, &length, True); /* [0] negoToken */
+		ber_read_contextual_tag(s, 0, &length, true); /* [0] negoToken */
 		ber_read_octet_string(s, &length); /* OCTET STRING */
 		freerdp_blob_alloc(negoToken, length);
 		stream_read(s, negoToken->data, length);
 	}
 
 	/* [2] authInfo (OCTET STRING) */
-	if (ber_read_contextual_tag(s, 2, &length, True) != False)
+	if (ber_read_contextual_tag(s, 2, &length, true) != false)
 	{
 		ber_read_octet_string(s, &length); /* OCTET STRING */
 		freerdp_blob_alloc(authInfo, length);
@@ -555,7 +572,7 @@ int credssp_recv(rdpCredssp* credssp, rdpBlob* negoToken, rdpBlob* authInfo, rdp
 	}
 
 	/* [3] pubKeyAuth (OCTET STRING) */
-	if (ber_read_contextual_tag(s, 3, &length, True) != False)
+	if (ber_read_contextual_tag(s, 3, &length, true) != false)
 	{
 		ber_read_octet_string(s, &length); /* OCTET STRING */
 		freerdp_blob_alloc(pubKeyAuth, length);
@@ -620,6 +637,7 @@ rdpCredssp* credssp_new(rdpTransport* transport)
 		self->transport = transport;
 		self->send_seq_num = 0;
 		self->ntlmssp = ntlmssp_new();
+		self->settings = transport->settings;
 	}
 
 	return self;

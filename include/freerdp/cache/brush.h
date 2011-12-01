@@ -22,29 +22,44 @@
 
 #include <freerdp/api.h>
 #include <freerdp/types.h>
+#include <freerdp/freerdp.h>
+#include <freerdp/update.h>
 #include <freerdp/utils/stream.h>
+
+typedef struct _BRUSH_ENTRY BRUSH_ENTRY;
+typedef struct rdp_brush_cache rdpBrushCache;
+
+#include <freerdp/cache/cache.h>
 
 struct _BRUSH_ENTRY
 {
-	uint8 bpp;
+	uint32 bpp;
 	void* entry;
 };
-typedef struct _BRUSH_ENTRY BRUSH_ENTRY;
 
-struct rdp_brush
+struct rdp_brush_cache
 {
+	pPatBlt PatBlt; /* 0 */
+	pCacheBrush CacheBrush; /* 1 */
+	uint32 paddingA[16 - 2]; /* 2 */
+
+	uint32 maxEntries; /* 16 */
+	uint32 maxMonoEntries; /* 17 */
+	BRUSH_ENTRY* entries; /* 18 */
+	BRUSH_ENTRY* monoEntries; /* 19 */
+	uint32 paddingB[32 - 20]; /* 20 */
+
+	/* internal */
+
 	rdpSettings* settings;
-	uint8 maxEntries;
-	uint8 maxMonoEntries;
-	BRUSH_ENTRY* entries;
-	BRUSH_ENTRY* monoEntries;
 };
-typedef struct rdp_brush rdpBrush;
 
-FREERDP_API void* brush_get(rdpBrush* brush, uint8 index, uint8* bpp);
-FREERDP_API void brush_put(rdpBrush* brush, uint8 index, void* entry, uint8 bpp);
+FREERDP_API void* brush_cache_get(rdpBrushCache* brush, uint32 index, uint32* bpp);
+FREERDP_API void brush_cache_put(rdpBrushCache* brush, uint32 index, void* entry, uint32 bpp);
 
-FREERDP_API rdpBrush* brush_new(rdpSettings* settings);
-FREERDP_API void brush_free(rdpBrush* brush);
+FREERDP_API void brush_cache_register_callbacks(rdpUpdate* update);
+
+FREERDP_API rdpBrushCache* brush_cache_new(rdpSettings* settings);
+FREERDP_API void brush_cache_free(rdpBrushCache* brush);
 
 #endif /* __BRUSH_CACHE_H */

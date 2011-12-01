@@ -39,7 +39,7 @@ static int update_recv_surfcmd_surface_bits(rdpUpdate* update, STREAM* s)
 	pos = stream_get_pos(s) + cmd->bitmapDataLength;
 	cmd->bitmapData = stream_get_tail(s);
 
-	IFCALL(update->SurfaceBits, update, cmd);
+	IFCALL(update->SurfaceBits, update->context, cmd);
 
 	stream_set_pos(s, pos);
 
@@ -48,12 +48,12 @@ static int update_recv_surfcmd_surface_bits(rdpUpdate* update, STREAM* s)
 
 static int update_recv_surfcmd_frame_marker(rdpUpdate* update, STREAM* s)
 {
-	uint16 frameAction;
-	uint32 frameId;
+	SURFACE_FRAME_MARKER* marker = &update->surface_frame_marker;
 
-	stream_read_uint16(s, frameAction);
-	stream_read_uint32(s, frameId);
-	/*printf("frameAction %d frameId %d\n", frameAction, frameId);*/
+	stream_read_uint16(s, marker->frameAction);
+	stream_read_uint32(s, marker->frameId);
+
+	IFCALL(update->SurfaceFrameMarker, update->context, marker);
 
 	return 6;
 }
@@ -84,7 +84,7 @@ boolean update_recv_surfcmds(rdpUpdate* update, uint32 size, STREAM* s)
 
 			default:
 				DEBUG_WARN("unknown cmdType 0x%X", cmdType);
-				return False;
+				return false;
 		}
 
 		size -= cmdLength;
@@ -95,7 +95,7 @@ boolean update_recv_surfcmds(rdpUpdate* update, uint32 size, STREAM* s)
 			pcap_flush(update->pcap_rfx);
 		}
 	}
-	return True;
+	return true;
 }
 
 void update_write_surfcmd_surface_bits_header(STREAM* s, SURFACE_BITS_COMMAND* cmd)

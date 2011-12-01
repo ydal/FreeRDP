@@ -39,7 +39,7 @@
 #define RAIL_ORDER_TYPE_GET_APPID_REQ		0x000E
 #define RAIL_ORDER_TYPE_GET_APPID_RESP		0x000F
 
-uint8 RAIL_ORDER_TYPE_STRINGS[][32] =
+static const char* const RAIL_ORDER_TYPE_STRINGS[] =
 {
 	"",
 	"Execute",
@@ -148,11 +148,11 @@ void rail_read_server_sysparam_order(STREAM* s, RAIL_SYSPARAM_ORDER* sysparam)
 	switch (sysparam->param)
 	{
 		case SPI_SET_SCREEN_SAVE_ACTIVE:
-			sysparam->setScreenSaveActive = (body != 0) ? True : False;
+			sysparam->setScreenSaveActive = (body != 0) ? true : false;
 			break;
 
 		case SPI_SET_SCREEN_SAVE_SECURE:
-			sysparam->setScreenSaveSecure = (body != 0) ? True : False;
+			sysparam->setScreenSaveSecure = (body != 0) ? true : false;
 			break;
 
 		default:
@@ -179,7 +179,7 @@ void rail_read_server_localmovesize_order(STREAM* s, RAIL_LOCALMOVESIZE_ORDER* l
 	stream_read_uint32(s, localmovesize->windowId); /* windowId (4 bytes) */
 
 	stream_read_uint16(s, isMoveSizeStart); /* isMoveSizeStart (2 bytes) */
-	localmovesize->isMoveSizeStart = (isMoveSizeStart != 0) ? True : False;
+	localmovesize->isMoveSizeStart = (isMoveSizeStart != 0) ? true : false;
 
 	stream_read_uint16(s, localmovesize->moveSizeType); /* moveSizeType (2 bytes) */
 	stream_read_uint16(s, localmovesize->posX); /* posX (2 bytes) */
@@ -249,15 +249,15 @@ void rail_write_client_sysparam_order(STREAM* s, RAIL_SYSPARAM_ORDER* sysparam)
 			break;
 
 		case SPI_SET_WORK_AREA:
-			rail_write_rectangle_16(s, &sysparam->workArea);
+			freerdp_write_rectangle_16(s, &sysparam->workArea);
 			break;
 
 		case SPI_DISPLAY_CHANGE:
-			rail_write_rectangle_16(s, &sysparam->displayChange);
+			freerdp_write_rectangle_16(s, &sysparam->displayChange);
 			break;
 
 		case SPI_TASKBAR_POS:
-			rail_write_rectangle_16(s, &sysparam->taskbarPos);
+			freerdp_write_rectangle_16(s, &sysparam->taskbarPos);
 			break;
 
 		case SPI_SET_HIGH_CONTRAST:
@@ -335,16 +335,16 @@ void rail_recv_handshake_order(rdpRailOrder* rail_order, STREAM* s)
 	rail_order->sysparam.highContrast.flags = 0x7E;
 
 	rail_order->sysparam.params |= SPI_MASK_SET_MOUSE_BUTTON_SWAP;
-	rail_order->sysparam.mouseButtonSwap = False;
+	rail_order->sysparam.mouseButtonSwap = false;
 
 	rail_order->sysparam.params |= SPI_MASK_SET_KEYBOARD_PREF;
-	rail_order->sysparam.keyboardPref = False;
+	rail_order->sysparam.keyboardPref = false;
 
 	rail_order->sysparam.params |= SPI_MASK_SET_DRAG_FULL_WINDOWS;
-	rail_order->sysparam.dragFullWindows = False;
+	rail_order->sysparam.dragFullWindows = false;
 
 	rail_order->sysparam.params |= SPI_MASK_SET_KEYBOARD_CUES;
-	rail_order->sysparam.keyboardCues = False;
+	rail_order->sysparam.keyboardCues = false;
 
 	rail_order->sysparam.params |= SPI_MASK_SET_WORK_AREA;
 	rail_order->sysparam.workArea.left = 0;

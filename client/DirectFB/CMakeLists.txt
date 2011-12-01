@@ -22,12 +22,16 @@ include_directories(${DIRECTFB_INCLUDE_DIRS})
 add_executable(dfreerdp
 	df_event.c
 	df_event.h
+	df_graphics.c
+	df_graphics.c
 	dfreerdp.c
 	dfreerdp.h)
 
 target_link_libraries(dfreerdp freerdp-core)
 target_link_libraries(dfreerdp freerdp-gdi)
 target_link_libraries(dfreerdp freerdp-kbd)
-target_link_libraries(dfreerdp freerdp-chanman)
+target_link_libraries(dfreerdp freerdp-channels)
 target_link_libraries(dfreerdp freerdp-utils)
 target_link_libraries(dfreerdp ${DIRECTFB_LIBRARIES})
+
+install(TARGETS dfreerdp DESTINATION ${CMAKE_INSTALL_BINDIR})

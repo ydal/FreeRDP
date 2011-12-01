@@ -22,17 +22,62 @@
 
 #include <freerdp/cache/offscreen.h>
 
-void* offscreen_get(rdpOffscreen* offscreen, uint16 index)
+void update_gdi_create_offscreen_bitmap(rdpContext* context, CREATE_OFFSCREEN_BITMAP_ORDER* create_offscreen_bitmap)
 {
-	void* bitmap;
+	int i;
+	uint16 index;
+	rdpBitmap* bitmap;
+	rdpCache* cache = context->cache;
 
-	if (index > offscreen->maxEntries)
+	bitmap = Bitmap_Alloc(context);
+
+	bitmap->width = create_offscreen_bitmap->cx;
+	bitmap->height = create_offscreen_bitmap->cy;
+
+	bitmap->New(context, bitmap);
+
+	offscreen_cache_delete(cache->offscreen, create_offscreen_bitmap->id);
+	offscreen_cache_put(cache->offscreen, create_offscreen_bitmap->id, bitmap);
+
+	if(cache->offscreen->currentSurface == create_offscreen_bitmap->id)
+		Bitmap_SetSurface(context, bitmap, false);
+
+	for (i = 0; i < create_offscreen_bitmap->deleteList.cIndices; i++)
+	{
+		index = create_offscreen_bitmap->deleteList.indices[i];
+		offscreen_cache_delete(cache->offscreen, index);
+	}
+}
+
+void update_gdi_switch_surface(rdpContext* context, SWITCH_SURFACE_ORDER* switch_surface)
+{
+	rdpCache* cache = context->cache;
+
+	if (switch_surface->bitmapId == SCREEN_BITMAP_SURFACE)
+	{
+		Bitmap_SetSurface(context, NULL, true);
+	}
+	else
+	{
+		rdpBitmap* bitmap;
+		bitmap = offscreen_cache_get(cache->offscreen, switch_surface->bitmapId);
+		Bitmap_SetSurface(context, bitmap, false);
+	}
+
+	cache->offscreen->currentSurface = switch_surface->bitmapId;
+}
+
+rdpBitmap* offscreen_cache_get(rdpOffscreenCache* offscreen_cache, uint32 index)
+{
+	rdpBitmap* bitmap;
+
+	if (index > offscreen_cache->maxEntries)
 	{
 		printf("invalid offscreen bitmap index: 0x%04X\n", index);
 		return NULL;
 	}
 
-	bitmap = offscreen->entries[index].bitmap;
+	bitmap = offscreen_cache->entries[index];
 
 	if (bitmap == NULL)
 	{
@@ -43,7 +88,7 @@ void* offscreen_get(rdpOffscreen* offscreen, uint16 index)
 	return bitmap;
 }
 
-void offscreen_put(rdpOffscreen* offscreen, uint16 index, void* bitmap)
+void offscreen_cache_put(rdpOffscreenCache* offscreen, uint32 index, rdpBitmap* bitmap)
 {
 	if (index > offscreen->maxEntries)
 	{
@@ -51,37 +96,74 @@ void offscreen_put(rdpOffscreen* offscreen, uint16 index, void* bitmap)
 		return;
 	}
 
-	offscreen->entries[index].bitmap = bitmap;
+	offscreen_cache_delete(offscreen, index);
+	offscreen->entries[index] = bitmap;
 }
 
-rdpOffscreen* offscreen_new(rdpSettings* settings)
+void offscreen_cache_delete(rdpOffscreenCache* offscreen, uint32 index)
 {
-	rdpOffscreen* offscreen;
+	rdpBitmap* prevBitmap;
 
-	offscreen = (rdpOffscreen*) xzalloc(sizeof(rdpOffscreen));
-
-	if (offscreen != NULL)
+	if (index > offscreen->maxEntries)
 	{
-		offscreen->settings = settings;
-
-		offscreen->maxSize = 7680;
-		offscreen->maxEntries = 100;
-
-		settings->offscreen_bitmap_cache = True;
-		settings->offscreen_bitmap_cache_size = offscreen->maxSize;
-		settings->offscreen_bitmap_cache_entries = offscreen->maxEntries;
-
-		offscreen->entries = (OFFSCREEN_ENTRY*) xzalloc(sizeof(OFFSCREEN_ENTRY) * offscreen->maxEntries);
+		printf("invalid offscreen bitmap index (delete): 0x%04X\n", index);
+		return;
 	}
 
-	return offscreen;
+	prevBitmap = offscreen->entries[index];
+
+	if (prevBitmap != NULL)
+		Bitmap_Free(offscreen->update->context, prevBitmap);
+
+	offscreen->entries[index] = NULL;
 }
 
-void offscreen_free(rdpOffscreen* offscreen)
+void offscreen_cache_register_callbacks(rdpUpdate* update)
 {
-	if (offscreen != NULL)
+	update->altsec->CreateOffscreenBitmap = update_gdi_create_offscreen_bitmap;
+	update->altsec->SwitchSurface = update_gdi_switch_surface;
+}
+
+rdpOffscreenCache* offscreen_cache_new(rdpSettings* settings)
+{
+	rdpOffscreenCache* offscreen_cache;
+
+	offscreen_cache = (rdpOffscreenCache*) xzalloc(sizeof(rdpOffscreenCache));
+
+	if (offscreen_cache != NULL)
 	{
-		xfree(offscreen->entries);
-		xfree(offscreen);
+		offscreen_cache->settings = settings;
+		offscreen_cache->update = ((freerdp*) settings->instance)->update;
+
+		offscreen_cache->currentSurface = SCREEN_BITMAP_SURFACE;
+		offscreen_cache->maxSize = 7680;
+		offscreen_cache->maxEntries = 100;
+
+		settings->offscreen_bitmap_cache_size = offscreen_cache->maxSize;
+		settings->offscreen_bitmap_cache_entries = offscreen_cache->maxEntries;
+
+		offscreen_cache->entries = (rdpBitmap**) xzalloc(sizeof(rdpBitmap*) * offscreen_cache->maxEntries);
+	}
+
+	return offscreen_cache;
+}
+
+void offscreen_cache_free(rdpOffscreenCache* offscreen_cache)
+{
+	int i;
+	rdpBitmap* bitmap;
+
+	if (offscreen_cache != NULL)
+	{
+		for (i = 0; i < offscreen_cache->maxEntries; i++)
+		{
+			bitmap = offscreen_cache->entries[i];
+
+			if (bitmap != NULL)
+				Bitmap_Free(offscreen_cache->update->context, bitmap);
+		}
+
+		xfree(offscreen_cache->entries);
+		xfree(offscreen_cache);
 	}
 }

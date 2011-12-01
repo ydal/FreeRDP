@@ -26,11 +26,18 @@
 
 struct rdp_mppc
 {
-    uint8_t *history_buf;
-    uint8_t *history_ptr;
+	uint8 *history_buf;
+	uint8 *history_buf_end;
+	uint8 *history_ptr;
 };
 
 // forward declarations
-int decompress_rdp_5(rdpRdp *, uint8_t *, int, int, uint32_t *, uint32_t *);
+int decompress_rdp(rdpRdp *, uint8 *, int, int, uint32 *, uint32 *);
+int decompress_rdp_4(rdpRdp *, uint8 *, int, int, uint32 *, uint32 *);
+int decompress_rdp_5(rdpRdp *, uint8 *, int, int, uint32 *, uint32 *);
+int decompress_rdp_6(rdpRdp *, uint8 *, int, int, uint32 *, uint32 *);
+int decompress_rdp_61(rdpRdp *, uint8 *, int, int, uint32 *, uint32 *);
+struct rdp_mppc *mppc_new(rdpRdp *rdp);
+void mppc_free(rdpRdp *rdp);
 
 #endif

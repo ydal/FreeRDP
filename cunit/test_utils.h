@@ -28,3 +28,5 @@ void test_semaphore(void);
 void test_load_plugin(void);
 void test_wait_obj(void);
 void test_args(void);
+void test_passphrase_read(void);
+void test_handle_signals(void);
